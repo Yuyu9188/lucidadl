@@ -1,0 +1,14 @@
+# Watchlist of TRACKS — one per line. Copy this file to `inputs/tracks.txt` and edit.
+# Run:  lucidadl tracks
+#
+# Each line can be:
+#   - a search "artist - title"        -> best Qobuz match is downloaded
+#       Red Hot Chili Peppers - Otherside
+#   - a direct track URL
+#       https://play.qobuz.com/track/24107150
+#   - a playlist/album URL             -> downloads all its tracks
+#
+# Blank lines and lines starting with # are ignored.
+# Already-downloaded items (tracked in the state file) are skipped.
+
+Red Hot Chili Peppers - Otherside

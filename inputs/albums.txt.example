@@ -1,0 +1,13 @@
+# Watchlist of ALBUMS — one per line. Copy this file to `inputs/albums.txt` and edit.
+# Run:  lucidadl albums
+#
+# Each line can be:
+#   - a search "artist - album"        -> best Qobuz match, downloaded track by track
+#       Red Hot Chili Peppers - Californication
+#   - a direct album URL
+#       https://play.qobuz.com/album/0093624932130
+#
+# Blank lines and lines starting with # are ignored.
+# Already-downloaded tracks are skipped.
+
+Red Hot Chili Peppers - Californication

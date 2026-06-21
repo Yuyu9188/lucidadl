@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Playwright browsers (install with: playwright install chromium)
+.ms-playwright/
+
+# Third-party reference clone (not part of this project)
+lucida-flow/
+
+# lucidadl runtime / user data (also stored in the OS user-data dir)
+.userdata/
+.state.json
+state.json
+clearance.json
+run.log
+failed.txt
+downloads/
+inputs/tracks.txt
+inputs/albums.txt
+inputs/playlist.txt
+*_debug.html
+*_debug.png
+
+# OS
+.DS_Store
+Thumbs.db

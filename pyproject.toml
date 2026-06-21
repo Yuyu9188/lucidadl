@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lucidadl"
+version = "0.1.0"
+description = "Fast, parallel CLI music downloader for lucida.to (Qobuz, Amazon Music) with local transcoding and playlist import."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["music", "downloader", "lucida", "qobuz", "cli"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+]
+dependencies = [
+    "playwright>=1.40",
+    "click>=8.1",
+    "httpx[http2]>=0.27",
+    "pyjson5>=1.6",
+    "imageio-ffmpeg>=0.4",
+]
+
+[project.scripts]
+lucidadl = "lucidadl.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/your-username/lucidadl"
+Issues = "https://github.com/your-username/lucidadl/issues"
+
+[tool.setuptools]
+packages = ["lucidadl"]
