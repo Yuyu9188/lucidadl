@@ -34,9 +34,9 @@ async def _resolve_url(client: LucidaClient, line: str, service: str, kind: str,
         if items:
             url = matching.pick_best(line, items)
             chosen = next((it for it in items if it.get("url") == url), {})
-            tag = f" [repli {svc}]" if i else ""
-            log(f"  ↳ choisi: «{chosen.get('title', '?')}» — {chosen.get('artist', '?')}{tag} "
-                f"(parmi {len(items)} résultats)")
+            tag = f" [fallback {svc}]" if i else ""
+            log(f"  ↳ chosen: \"{chosen.get('title', '?')}\" — {chosen.get('artist', '?')}{tag} "
+                f"(among {len(items)} results)")
             return url
     return None
 
@@ -95,7 +95,7 @@ async def _resolve_targets(client, line, kind, service, country, strict, log
     if not targets:
         return None
     if is_album:
-        log(f"  ⤷ album «{line}» → {len(targets)} pistes")
+        log(f"  ⤷ album \"{line}\" → {len(targets)} tracks")
     return targets
 
 
@@ -105,7 +105,7 @@ async def _download_target(client, state, target, country, out, dedup, organize_
     log = reporter.log
     reserved = False
     if dedup and not state.reserve(url):
-        log(f"  ⏭ déjà téléchargé / en cours, ignoré: {label}")
+        log(f"  ⏭ already downloaded / in progress, skipped: {label}")
         async with lock:
             totals["skip"] += 1
         return
@@ -125,7 +125,7 @@ async def _download_target(client, state, target, country, out, dedup, organize_
         except Exception as e:
             last_err = e
             if attempt == 0:
-                reporter.status(url, f"{e} — nouvelle tentative")
+                reporter.status(url, f"{e} — retrying")
                 await asyncio.sleep(3)
     if path is None:
         if reserved:
@@ -143,7 +143,7 @@ async def _download_target(client, state, target, country, out, dedup, organize_
             placed = await asyncio.to_thread(
                 organize.process_download, path, out, collection, target.get("meta"))
         except Exception as e:
-            log(f"  ⚠ rangement échoué ({os.path.basename(path)}): {e}")
+            log(f"  ⚠ organizing failed ({os.path.basename(path)}): {e}")
         if placed:
             finals = placed
         else:
@@ -153,7 +153,7 @@ async def _download_target(client, state, target, country, out, dedup, organize_
             # (that would loop forever): fail it so `retry` re-attempts.
             if reserved:
                 state.release(url)
-            reporter.finish(url, False, f"  ✗ {label}: rangement sans fichier (archive vide ?)")
+            reporter.finish(url, False, f"  ✗ {label}: organized with no file (empty archive?)")
             async with lock:
                 totals["fail"] += 1
                 failed.append(url)
@@ -166,7 +166,7 @@ async def _download_target(client, state, target, country, out, dedup, organize_
                     transcode.transcode, fp, tx["fmt"], tx.get("bitrate"),
                     tx.get("keep", False), lambda *_: None))
             except Exception as e:
-                log(f"  ⚠ transcode échoué ({os.path.basename(fp)}): {e}")
+                log(f"  ⚠ transcode failed ({os.path.basename(fp)}): {e}")
                 converted.append(fp)
         finals = converted
 
@@ -174,11 +174,11 @@ async def _download_target(client, state, target, country, out, dedup, organize_
         totals["ok"] += 1
     shown = os.path.relpath(finals[0], out) if finals else os.path.basename(path)
     extra = f" (+{len(finals) - 1})" if len(finals) > 1 else ""
-    reporter.finish(url, True, f"  ✓ {shown}{extra}  ({_filesize_mb(finals[0]):.1f} Mo)")
+    reporter.finish(url, True, f"  ✓ {shown}{extra}  ({_filesize_mb(finals[0]):.1f} MB)")
     try:
         state.add(url, finals[0] if finals else path)
     except Exception as e:
-        log(f"  ⚠ état non sauvegardé ({url}): {e}")
+        log(f"  ⚠ state not saved ({url}): {e}")
 
 
 async def run_batch(client: LucidaClient, state: utils.State, items: List[str],
@@ -203,13 +203,13 @@ async def run_batch(client: LucidaClient, state: utils.State, items: List[str],
             try:
                 tg = await _resolve_targets(client, line, kind, service, country, strict, log)
             except Exception as e:
-                log(f"  ✗ résolution «{line}»: {e}")
+                log(f"  ✗ resolving \"{line}\": {e}")
                 async with lock:
                     totals["fail"] += 1
                     failed.append(line)
                 return
             if tg is None:
-                log(f"  ⃠ introuvable, ignoré: {line}")
+                log(f"  ⃠ not found, skipped: {line}")
                 async with lock:
                     totals["skip"] += 1
                     failed.append(line)  # so `retry` can re-search it later
@@ -220,7 +220,7 @@ async def run_batch(client: LucidaClient, state: utils.State, items: List[str],
     await asyncio.gather(*(resolve_worker(line) for line in items), return_exceptions=True)
     if not targets:
         return totals, failed
-    log(f"→ {len(targets)} piste(s) à télécharger ({jobs} en parallèle)…")
+    log(f"→ {len(targets)} track(s) to download ({jobs} in parallel)…")
 
     # Phase 2 — download every track concurrently over httpx (no browser).
     async def dl_worker(target: Dict) -> None:

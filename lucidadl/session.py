@@ -65,8 +65,8 @@ async def lucida_context(headless: bool = False, channel: Optional[str] = None,
                         ) -> AsyncIterator[BrowserContext]:
     """A real (headed) Chromium passes Cloudflare; true headless is challenged and
     fails. `hidden=True` keeps it headed but moves the window off-screen, so it runs
-    invisibly ("en fond") while still clearing Cloudflare. It still needs a logged-in
-    desktop session."""
+    invisibly (in the background) while still clearing Cloudflare. It still needs a
+    logged-in desktop session."""
     channel = channel or os.environ.get("LUCIDA_CHANNEL") or None
     os.makedirs(USER_DATA_DIR, exist_ok=True)
     if downloads_dir:
@@ -151,12 +151,12 @@ async def acquire_clearance(hidden: bool = False) -> Tuple[str, str]:
     Raises BrowserClosed / RuntimeError on failure."""
     async with lucida_context(hidden=hidden) as ctx:
         if not await ensure_cleared(ctx, timeout=180):
-            raise RuntimeError("Cloudflare non franchi")
+            raise RuntimeError("Cloudflare not cleared")
         cookies = await ctx.cookies("https://lucida.to")
         cf = next((c["value"] for c in cookies if c["name"] == "cf_clearance"), None)
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         ua = (await page.evaluate("() => navigator.userAgent")).replace("HeadlessChrome", "Chrome")
     if not cf:
-        raise RuntimeError("cf_clearance absent après le passage Cloudflare")
+        raise RuntimeError("cf_clearance missing after clearing Cloudflare")
     save_clearance(cf, ua)
     return cf, ua

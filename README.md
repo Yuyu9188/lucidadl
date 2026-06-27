@@ -1,5 +1,9 @@
 # lucidadl
 
+[![CI](https://github.com/Jude-A/lucidadl/actions/workflows/ci.yml/badge.svg)](https://github.com/Jude-A/lucidadl/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+
 Fast, parallel command-line music downloader built on top of
 [lucida.to](https://lucida.to). Search or paste a URL, download tracks and albums in
 parallel over plain HTTP, organize them by tags, transcode to the format/bitrate you
@@ -20,7 +24,7 @@ want, and import playlists.
   native album zip).
 - **Local transcoding** with ffmpeg (`--to mp3 --bitrate 320k`) — bundled, nothing to
   install. Tags and cover art preserved.
-- **Tag-based organization** into `Artistes/<Artist>/<Album>/…` (falls back to the
+- **Tag-based organization** into `Artists/<Artist>/<Album>/…` (falls back to the
   source's artist/album metadata when a file has no embedded tags, so nothing lands in
   "Unknown"); playlists go under `Playlists/<name>/`, kept separate from artists.
 - **Watchlists** with dedup (`tracks` / `albums` read a file, skip what's done — but a
@@ -51,7 +55,7 @@ desktop session (it can't run on a locked/headless server).
 
 ```bash
 pip install --user pipx && python -m pipx ensurepath   # once, if you don't have pipx
-git clone https://github.com/your-username/lucidadl
+git clone https://github.com/Jude-A/lucidadl
 pipx install ./lucidadl
 pipx run playwright install chromium                    # one-time: download the browser
 ```
@@ -59,7 +63,7 @@ pipx run playwright install chromium                    # one-time: download the
 **Or with plain pip** (into your Python; its `Scripts`/`bin` must be on PATH):
 
 ```bash
-git clone https://github.com/your-username/lucidadl
+git clone https://github.com/Jude-A/lucidadl
 cd lucidadl
 pip install .            # or `pip install -e .` to keep editing the code
 playwright install chromium
@@ -120,8 +124,8 @@ live/… unless you ask for them). A playlist/album URL downloads all its tracks
 - `--keep-original` — keep the source FLAC next to the transcoded file.
 - `--force` — ignore the dedup memory and re-download even items already recorded as
   done (handy if `state.json` drifted out of sync).
-- `--organize / --flat` — tag-based `Artist/Album/` (default) vs everything in
-  `downloads/Music/`.
+- `--organize / --flat` — tag-based `Artists/<Artist>/<Album>/` (default) vs everything
+  flat in `<music folder>/Music/`.
 - `--country` — country code (default `US` for Qobuz; Amazon needs none).
 - `-o, --out` — output directory for this run (default: the configured music folder,
   `~/Downloads/music`).
@@ -181,10 +185,16 @@ watchlist with your OS scheduler. A Windows example is provided in `schedule.ps1
   Python that runs `lucida` (tags can't be read). `pip install mutagen` into that
   interpreter (it's a declared dependency, so a normal `pip install .`/`pipx` install
   pulls it). lucidadl now prints a warning when it's absent.
-- **"Cloudflare non franchi"** → run `lucida setup` again (the cached cookie expired).
+- **"Cloudflare not cleared"** → run `lucida setup` again (the cached cookie expired).
 - **"Executable doesn't exist"** → run `playwright install chromium`.
 - **Search finds nothing** → try a direct URL, or `-s amazon`.
 - **`lucida doctor`** → checks Python, Playwright, and reachability.
+
+## Contributing
+
+Bug reports and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup
+and how to run the offline self-tests. Notable changes are tracked in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

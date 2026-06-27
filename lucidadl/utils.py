@@ -86,8 +86,8 @@ class State:
                 except OSError:
                     bak = path
                 sys.stderr.write(
-                    f"⚠ état de dédup illisible ({path}: {e}) — sauvegardé en {bak} puis "
-                    f"réinitialisé ; des doublons sont possibles ce run.\n")
+                    f"⚠ dedup state unreadable ({path}: {e}) — backed up to {bak} then "
+                    f"reset; duplicates are possible this run.\n")
 
     def has(self, key: str) -> bool:
         """True if this URL counts as already-downloaded. A recorded path that no

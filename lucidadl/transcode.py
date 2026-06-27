@@ -65,7 +65,7 @@ def build_cmd(ff: str, src: str, dst: str, fmt: str, bitrate: Optional[str]) -> 
     elif fmt == "wav":
         enc = ["-map", "0:a", "-c:a", "pcm_s16le"]
     else:
-        raise ValueError(f"format de transcodage inconnu: {fmt}")
+        raise ValueError(f"unknown transcode format: {fmt}")
     return base + enc + [dst]
 
 
@@ -76,7 +76,7 @@ def transcode(src: str, fmt: str, bitrate: Optional[str] = None,
     fmt = (fmt or "").lower()
     ext = EXT.get(fmt)
     if not ext:
-        raise ValueError(f"format inconnu: {fmt}")
+        raise ValueError(f"unknown format: {fmt}")
     root, src_ext = os.path.splitext(src)
     if src_ext.lower() == ext.lower():
         return src  # already in the target format — nothing to do

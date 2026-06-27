@@ -115,7 +115,7 @@ class LucidaClient:
             try:
                 cf, ua = await self.acquire()
             except Exception as e:
-                self.log(f"  ⚠ rafraîchissement Cloudflare échoué: {e}")
+                self.log(f"  ⚠ Cloudflare refresh failed: {e}")
                 return False
             self.cf, self.ua = cf, ua
             if self.http is not None:
@@ -145,16 +145,16 @@ class LucidaClient:
         if cc:
             params["country"] = cc
         params["query"] = query
-        self.log(f"  recherche: {query!r} sur {svc}" + (f" ({cc})" if cc else ""))
+        self.log(f"  searching: {query!r} on {svc}" + (f" ({cc})" if cc else ""))
         r = await self._get(LUCIDA + "/search", params=params)
         blob = _between(r.text, _PD_START, _PD_END)
         if not blob:
-            self.log(f"  (pas de données de recherche; status {r.status_code})")
+            self.log(f"  (no search data; status {r.status_code})")
             return {"tracks": [], "albums": [], "artists": []}
         try:
             data = pyjson5.loads(blob)
         except Exception as e:
-            self.log(f"  (parse recherche: {e})")
+            self.log(f"  (search parse: {e})")
             return {"tracks": [], "albums": [], "artists": []}
         return _extract_search_results(data)
 
@@ -170,7 +170,7 @@ class LucidaClient:
         r = await self._get(LUCIDA + "/", params=params)
         blob = _between(r.text, _PD_START, _PD_END)
         if not blob:
-            raise LucidaError(f"token introuvable (status {r.status_code}, format changé ?)")
+            raise LucidaError(f"token not found (status {r.status_code}, format changed?)")
         try:
             return pyjson5.loads(blob)
         except Exception as e:
@@ -215,7 +215,7 @@ class LucidaClient:
             err = (j.get("error") if isinstance(j, dict) else None) or r.text[:150]
             self.log(f"    /api/load ({r.status_code}): {err}")
             await asyncio.sleep(5)
-        raise LucidaError("échec /api/load")
+        raise LucidaError("/api/load failed")
 
     async def run_job(self, handoff: str, server: str, dest_dir: str, base_name: str,
                       title: str = "", timeout: int = 1800,
@@ -238,7 +238,7 @@ class LucidaClient:
             if status == "completed":
                 break
             if status == "error":
-                raise LucidaError(f"serveur lucida: {msg or 'erreur'}")
+                raise LucidaError(f"lucida server: {msg or 'error'}")
             if msg and msg != last_msg:
                 last_msg = msg
                 if on_status:
@@ -249,10 +249,10 @@ class LucidaClient:
             if state != last_state:
                 last_state, last_change = state, time.time()
             elif time.time() - last_change >= 40:
-                raise LucidaError("bloqué (>40s sans progrès)")
+                raise LucidaError("stuck (>40s without progress)")
             await asyncio.sleep(1)
         else:
-            raise LucidaError("poll: délai dépassé")
+            raise LucidaError("poll: timed out")
 
         os.makedirs(_long(dest_dir), exist_ok=True)
         async with self.http.stream("GET", base + "/download") as resp:
@@ -288,7 +288,7 @@ class LucidaClient:
                 except OSError:
                     pass
                 if isinstance(e, OSError):
-                    raise LucidaError(f"écriture: {e}")
+                    raise LucidaError(f"write: {e}")
                 raise
         return dest
 
@@ -372,7 +372,7 @@ async def applemusic_tracklist(page, url: str, log=print):
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
     except Exception as e:
-        log(f"  navigation Apple Music: {e}")
+        log(f"  Apple Music navigation: {e}")
     await page.wait_for_timeout(1500)
     await _dismiss_consent(page)
     try:
@@ -401,7 +401,7 @@ async def applemusic_tracklist(page, url: str, log=print):
                 tracks.append({"title": title, "artist": artist})
                 new += 1
         if new:
-            log(f"    … {len(tracks)} titres")
+            log(f"    … {len(tracks)} titles")
         try:
             pos = await page.evaluate(_APPLE_SCROLL_JS)
         except Exception:
@@ -512,12 +512,12 @@ async def playlist_tracklist(page, url: str, log=print):
     if "music.apple.com" in host:
         return await applemusic_tracklist(page, url, log)
     if not _PLAYLIST_OTHERS_ENABLED:
-        log("  source non supportée pour l'instant — seul Apple Music est actif "
-            "(Spotify/Deezer/Tidal à venir).")
+        log("  source not supported for now — only Apple Music is active "
+            "(Spotify/Deezer/Tidal coming soon).")
         return "", []
     src, sel = _playlist_source(url)
     if not sel:
-        log(f"  source de playlist non reconnue: {host or url}")
+        log(f"  unrecognized playlist source: {host or url}")
         return "", []
     return await _scrape_playlist(page, url, sel, src, log)
 
@@ -526,7 +526,7 @@ async def _scrape_playlist(page, url, sel, label, log):
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
     except Exception as e:
-        log(f"  navigation {label}: {e}")
+        log(f"  {label} navigation: {e}")
     await page.wait_for_timeout(1500)
     await _dismiss_consent(page)
     try:
@@ -556,7 +556,7 @@ async def _scrape_playlist(page, url, sel, label, log):
                 tracks.append({"title": title, "artist": artist})
                 new += 1
         if new:
-            log(f"    … {len(tracks)} titres")
+            log(f"    … {len(tracks)} titles")
         try:
             pos = await page.evaluate(_SCROLL_GENERIC_JS, sel["row"])
         except Exception:

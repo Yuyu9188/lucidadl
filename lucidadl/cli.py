@@ -29,18 +29,18 @@ FAILED_PATH = paths.FAILED_PATH
 def _write_failed(items) -> None:
     try:
         with open(FAILED_PATH, "w", encoding="utf-8") as f:
-            f.write("# Items en échec — relance avec : lucidadl retry\n")
+            f.write("# Failed items — re-run with: lucidadl retry\n")
             f.write("\n".join(items) + "\n")
     except Exception as e:
         # don't fail silently: the user is told to `retry`, but the list wasn't saved.
-        click.secho(f"⚠ impossible d'écrire {FAILED_PATH} ({e}) — `retry` n'aura pas ces "
-                    f"items. À relancer manuellement :", fg="yellow")
+        click.secho(f"⚠ couldn't write {FAILED_PATH} ({e}) — `retry` won't have these "
+                    f"items. Re-run them manually:", fg="yellow")
         for it in items:
             click.echo(f"    {it}")
 
 _CLOSED_HINT = (
-    "Le navigateur s'est fermé tout seul. Essaie : (1) relancer ; (2) ferme les "
-    "fenêtres Chrome ; (3) pour forcer ton vrai Chrome : $env:LUCIDA_CHANNEL='chrome'."
+    "The browser closed on its own. Try: (1) re-run; (2) close any open Chrome "
+    "windows; (3) to force your real Chrome: $env:LUCIDA_CHANNEL='chrome'."
 )
 
 
@@ -58,31 +58,31 @@ def _read_lines(path: str) -> List[str]:
 
 def _service_opts(f):
     f = click.option("-s", "--service", default="qobuz",
-                     help="Service source (qobuz par défaut, amazon).")(f)
-    f = click.option("--country", default=None, help="Code pays (def: US pour qobuz).")(f)
+                     help="Source service (qobuz by default, amazon).")(f)
+    f = click.option("--country", default=None, help="Country code (def: US for qobuz).")(f)
     f = click.option("-F", "--format", "downscale", default="original",
                      type=click.Choice(DOWNSCALE_CHOICES),
-                     help="Format demandé à lucida (conversion côté serveur, sans contrôle "
-                          "du bitrate). Pour format + bitrate précis, préfère --to.")(f)
-    f = click.option("-o", "--out", default=DEFAULT_OUT, help="Dossier de sortie.")(f)
+                     help="Format requested from lucida (server-side conversion, no bitrate "
+                          "control). For a precise format + bitrate, prefer --to.")(f)
+    f = click.option("-o", "--out", default=DEFAULT_OUT, help="Output folder.")(f)
     f = click.option("--organize/--flat", "organize_on", default=True,
-                     help="Rangement par tags en Artiste/Album/ (défaut) ; "
-                          "--flat = tout dans downloads/Music/.")(f)
+                     help="Sort by tags into Artists/<Artist>/<Album>/ (default); "
+                          "--flat = everything flat in <music folder>/Music/.")(f)
     f = click.option("-j", "--jobs", default=3, type=click.IntRange(1, 20),
-                     help="Téléchargements en parallèle (1–20, def 3).")(f)
+                     help="Parallel downloads (1–20, def 3).")(f)
     f = click.option("--to", "to_fmt", default=None, type=click.Choice(transcode.CHOICES),
-                     help="Transcodage local ffmpeg (recommandé) : télécharge en FLAC puis "
-                          "convertit vers ce format. Bitrate réglable via --bitrate.")(f)
+                     help="Local ffmpeg transcoding (recommended): download as FLAC then "
+                          "convert to this format. Bitrate adjustable via --bitrate.")(f)
     f = click.option("--bitrate", default=None,
-                     help="Bitrate pour --to (ex: 320k, 256k, 192k).")(f)
+                     help="Bitrate for --to (e.g. 320k, 256k, 192k).")(f)
     f = click.option("--keep-original", "keep_orig", is_flag=True,
-                     help="Garder le FLAC d'origine à côté du fichier transcodé.")(f)
+                     help="Keep the original FLAC alongside the transcoded file.")(f)
     f = click.option("--force", "force", is_flag=True,
-                     help="Ignorer la mémoire de dédup et (re)télécharger, même si déjà "
-                          "fait (utile après avoir supprimé des fichiers).")(f)
+                     help="Ignore the dedup memory and (re)download, even if already "
+                          "done (useful after deleting files).")(f)
     f = click.option("--hidden/--visible", "hidden", default=False,
-                     help="--hidden = fenêtre hors-écran si un passage Cloudflare est requis "
-                          "(sinon aucun navigateur ne s'ouvre). Défaut: visible.")(f)
+                     help="--hidden = off-screen window if a Cloudflare pass is required "
+                          "(otherwise no browser opens). Default: visible.")(f)
     return f
 
 
@@ -90,9 +90,9 @@ def _service_opts(f):
 @click.version_option(message="lucidadl %(version)s")
 @click.pass_context
 def cli(ctx):
-    """Téléchargeur lucida.to en HTTP parallèle (navigateur requis seulement pour Cloudflare).
+    """Parallel-HTTP lucida.to downloader (browser only needed for Cloudflare).
 
-    Sans argument, ouvre le menu interactif (`lucida ui`)."""
+    With no argument, opens the interactive menu (`lucida ui`)."""
     if ctx.invoked_subcommand is None:
         from . import tui
         tui.run()
@@ -100,7 +100,7 @@ def cli(ctx):
 
 @cli.command("ui")
 def ui_cmd():
-    """Menu interactif : télécharger, rechercher, importer une playlist, régler."""
+    """Interactive menu: download, search, import a playlist, configure."""
     from . import tui
     tui.run()
 
@@ -113,7 +113,7 @@ async def _run(items: List[str], kind: str, service: str, country: Optional[str]
                bitrate: Optional[str] = None, keep_orig: bool = False,
                collection: Optional[str] = None, force: bool = False) -> None:
     if not items:
-        click.secho("Rien à télécharger.", fg="yellow")
+        click.secho("Nothing to download.", fg="yellow")
         return
     if force:
         dedup = False  # re-download even what state.json remembers
@@ -124,13 +124,13 @@ async def _run(items: List[str], kind: str, service: str, country: Optional[str]
         downscale = "original"
         tx = {"fmt": to_fmt, "bitrate": bitrate, "keep": keep_orig}
         if not transcode.available():
-            click.secho("⚠ ffmpeg introuvable — installe-le (pip install imageio-ffmpeg) "
-                        "ou enlève --to.", fg="red")
+            click.secho("⚠ ffmpeg not found — install it (pip install imageio-ffmpeg) "
+                        "or drop --to.", fg="red")
             return
     if organize_on and not organize.mutagen_available():
-        click.secho("⚠ mutagen introuvable — les tags ne peuvent pas être lus ; le tri "
-                    "par artiste/album s'appuiera sur les métadonnées de l'API (sinon "
-                    "« Unknown »). Installe-le : pip install mutagen", fg="yellow")
+        click.secho("⚠ mutagen not found — tags can't be read; sorting by "
+                    "artist/album will rely on the API metadata (otherwise "
+                    "\"Unknown\"). Install it: pip install mutagen", fg="yellow")
     os.makedirs(out, exist_ok=True)
     state = utils.State(STATE_PATH)
     logf = open(LOG_PATH, "w", encoding="utf-8")
@@ -145,14 +145,14 @@ async def _run(items: List[str], kind: str, service: str, country: Optional[str]
         # the browser briefly to solve it. Downloads then run over httpx (RAM-light).
         cf, ua = load_clearance()
         if not (cf and ua):
-            log("Pas de cookie Cloudflare — ouverture brève du navigateur…")
+            log("No Cloudflare cookie — briefly opening the browser…")
             try:
                 cf, ua = await acquire_clearance(hidden=hidden)
             except BrowserClosed:
                 log(_CLOSED_HINT)
                 return
             except Exception as e:
-                log(f"Cloudflare non franchi: {e}. Lance `setup`.")
+                log(f"Couldn't clear Cloudflare: {e}. Run `setup`.")
                 return
 
         async def _acquire():
@@ -161,20 +161,20 @@ async def _run(items: List[str], kind: str, service: str, country: Optional[str]
         client = LucidaClient(cf, ua, acquire=_acquire, country=cc, downscale=downscale,
                               metadata=True, jobs=jobs, log=log)
         await client.start_http()
-        log(f"Téléchargement de {len(items)} élément(s) — {jobs} en parallèle (sans navigateur)…")
+        log(f"Downloading {len(items)} item(s) — {jobs} in parallel (no browser)…")
         try:
             totals, failed = await run_batch(client, state, items, kind, service, cc, out,
                                              jobs, dedup, organize_on, tx,
                                              collection=collection, reporter=reporter)
         finally:
             await client.aclose()
-        log(f"\nTerminé — OK:{totals['ok']}  ignorés:{totals['skip']}  échecs:{totals['fail']}")
+        log(f"\nDone — OK:{totals['ok']}  skipped:{totals['skip']}  failed:{totals['fail']}")
         if failed:
             _write_failed(failed)
-            log(f"  → {len(failed)} échec(s) écrits dans {FAILED_PATH} "
-                f"(relance : lucida retry)")
+            log(f"  → {len(failed)} failure(s) written to {FAILED_PATH} "
+                f"(re-run: lucida retry)")
     except Exception as e:
-        log(f"ERREUR FATALE: {e}")
+        log(f"FATAL ERROR: {e}")
         log(traceback.format_exc())
     finally:
         try:
@@ -185,17 +185,17 @@ async def _run(items: List[str], kind: str, service: str, country: Optional[str]
             logf.close()
         except Exception:
             pass
-    click.secho(f"→ Fichiers dans {out}  ·  journal : {LOG_PATH}", fg="cyan")
+    click.secho(f"→ Files in {out}  ·  log: {LOG_PATH}", fg="cyan")
 
 
-# --- ad-hoc (singulier) : args, sans dédup ---------------------------------
+# --- ad-hoc (singular): args, no dedup -------------------------------------
 
 @cli.command("track")
 @click.argument("items", nargs=-1, required=True)
 @_service_opts
 def track_cmd(items, service, country, downscale, out, organize_on, jobs, to_fmt,
               bitrate, keep_orig, force, hidden):
-    """Un/des titre(s) maintenant : track "artiste - titre" (ou URL). Force le DL."""
+    """One or more tracks now: track "artist - title" (or URL). Forces the DL."""
     asyncio.run(_run(list(items), "track", service, country, downscale, out,
                      hidden, jobs, dedup=False, organize_on=organize_on,
                      to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig, force=force))
@@ -206,21 +206,21 @@ def track_cmd(items, service, country, downscale, out, organize_on, jobs, to_fmt
 @_service_opts
 def album_cmd(items, service, country, downscale, out, organize_on, jobs,
               to_fmt, bitrate, keep_orig, force, hidden):
-    """Un/des album(s) maintenant : album "artiste - album" (ou URL), déroulé piste par piste."""
+    """One or more albums now: album "artist - album" (or URL), expanded track by track."""
     asyncio.run(_run(list(items), "album", service, country, downscale, out,
                      hidden, jobs, dedup=False, organize_on=organize_on,
                      to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig, force=force))
 
 
-# --- watchlist (pluriel) : fichier, avec dédup -----------------------------
+# --- watchlist (plural): file, with dedup ----------------------------------
 
 @cli.command("tracks")
 @click.option("-f", "--file", "file", default=os.path.join(INPUTS, "tracks.txt"),
-              help="Fichier de titres/URLs, un par ligne (def: inputs/tracks.txt).")
+              help="File of titles/URLs, one per line (def: inputs/tracks.txt).")
 @_service_opts
 def tracks_cmd(file, service, country, downscale, out, organize_on, jobs, to_fmt,
                bitrate, keep_orig, force, hidden):
-    """Watchlist titres : télécharge inputs/tracks.txt (dédup activée)."""
+    """Tracks watchlist: download inputs/tracks.txt (dedup enabled)."""
     asyncio.run(_run(_read_lines(file), "track", service, country, downscale, out,
                      hidden, jobs, dedup=True, organize_on=organize_on,
                      to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig, force=force))
@@ -228,11 +228,11 @@ def tracks_cmd(file, service, country, downscale, out, organize_on, jobs, to_fmt
 
 @cli.command("albums")
 @click.option("-f", "--file", "file", default=os.path.join(INPUTS, "albums.txt"),
-              help="Fichier d'albums/URLs, un par ligne (def: inputs/albums.txt).")
+              help="File of albums/URLs, one per line (def: inputs/albums.txt).")
 @_service_opts
 def albums_cmd(file, service, country, downscale, out, organize_on, jobs,
                to_fmt, bitrate, keep_orig, force, hidden):
-    """Watchlist albums : télécharge inputs/albums.txt (dédup activée)."""
+    """Albums watchlist: download inputs/albums.txt (dedup enabled)."""
     asyncio.run(_run(_read_lines(file), "album", service, country, downscale, out,
                      hidden, jobs, dedup=True, organize_on=organize_on,
                      to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig, force=force))
@@ -242,10 +242,10 @@ def albums_cmd(file, service, country, downscale, out, organize_on, jobs,
 @_service_opts
 def retry_cmd(service, country, downscale, out, organize_on, jobs, to_fmt,
               bitrate, keep_orig, force, hidden):
-    """Relance les items en échec du dernier run (failed.txt)."""
+    """Re-run the failed items from the last run (failed.txt)."""
     items = _read_lines(FAILED_PATH)
     if not items:
-        click.secho("Aucun échec à relancer (failed.txt est vide).", fg="yellow")
+        click.secho("No failures to re-run (failed.txt is empty).", fg="yellow")
         return
     asyncio.run(_run(items, "track", service, country, downscale, out,
                      hidden, jobs, dedup=True, organize_on=organize_on,
@@ -281,7 +281,7 @@ async def _search(query, service, country, downscale, out, organize_on, jobs,
         try:
             cf, ua = await acquire_clearance(hidden=hidden)
         except Exception as e:
-            click.secho(f"Cloudflare: {e}. Lance `setup`.", fg="red")
+            click.secho(f"Cloudflare: {e}. Run `setup`.", fg="red")
             return
     client = LucidaClient(cf, ua, acquire=lambda: acquire_clearance(hidden=hidden),
                           country=cc, downscale=downscale, log=click.echo)
@@ -294,26 +294,26 @@ async def _search(query, service, country, downscale, out, organize_on, jobs,
     entries = []
     albums, tracks = res.get("albums") or [], res.get("tracks") or []
     if albums:
-        click.secho("\nAlbums :", fg="cyan")
+        click.secho("\nAlbums:", fg="cyan")
         for it in albums[:15]:
             entries.append(("album", it))
             click.echo(f"  {len(entries):>2}. {it.get('title', '?')} — {it.get('artist', '?')}")
     if tracks:
-        click.secho("\nTitres :", fg="cyan")
+        click.secho("\nTracks:", fg="cyan")
         for it in tracks[:15]:
             entries.append(("track", it))
             alb = f"  [{it.get('album', '')}]" if it.get("album") else ""
             click.echo(f"  {len(entries):>2}. {it.get('title', '?')} — {it.get('artist', '?')}{alb}")
     if not entries:
-        click.secho("Aucun résultat.", fg="yellow")
+        click.secho("No results.", fg="yellow")
         return
 
     try:
-        sel = (await asyncio.to_thread(input, "\nNuméro à télécharger (Entrée = annuler) : ")).strip()
+        sel = (await asyncio.to_thread(input, "\nNumber to download (Enter = cancel): ")).strip()
     except EOFError:
         sel = ""
     if not sel.isdigit() or not (1 <= int(sel) <= len(entries)):
-        click.echo("Annulé.")
+        click.echo("Cancelled.")
         return
     kind, item = entries[int(sel) - 1]
     await _run([item["url"]], kind, service, country, downscale, out, hidden, jobs,
@@ -326,7 +326,7 @@ async def _search(query, service, country, downscale, out, organize_on, jobs,
 @_service_opts
 def search_cmd(query, service, country, downscale, out, organize_on, jobs,
                to_fmt, bitrate, keep_orig, force, hidden):
-    """Recherche interactive : liste les résultats, télécharge celui que tu choisis."""
+    """Interactive search: lists the results, downloads the one you pick."""
     asyncio.run(_search(" ".join(query), service, country, downscale, out, organize_on,
                         jobs, to_fmt, bitrate, keep_orig, hidden, force=force))
 
@@ -348,7 +348,7 @@ async def _playlist(url, dry_run, service, country, downscale, out, hidden,
             return await api.playlist_tracklist(page, url, click.echo)
 
     try:
-        click.echo("Lecture de la playlist (navigateur headless)…")
+        click.echo("Reading the playlist (headless browser)…")
         try:
             name, tracks = await _scrape(headless=True)
         except BrowserClosed:
@@ -356,22 +356,22 @@ async def _playlist(url, dry_run, service, country, downscale, out, hidden,
         except Exception as e:
             click.secho(f"  headless: {e}", fg="yellow")  # fall through to the headed retry
         if not tracks:
-            click.secho("Headless infructueux — nouvelle tentative en fenêtre visible…",
+            click.secho("Headless unsuccessful — retrying with a visible window…",
                         fg="yellow")
             name, tracks = await _scrape(headless=False)
     except BrowserClosed:
         click.secho(_CLOSED_HINT, fg="red")
         return
     except Exception as e:
-        click.secho(f"✗ extraction playlist: {e}", fg="red")
+        click.secho(f"✗ playlist extraction: {e}", fg="red")
         return
 
     if not tracks:
-        click.secho("Aucun titre extrait (un <source>_debug.html a pu être écrit).", fg="red")
+        click.secho("No tracks extracted (a <source>_debug.html may have been written).", fg="red")
         return
 
     collection = name or "Playlist"
-    click.secho(f"\nPlaylist «{collection}» — {len(tracks)} titres :", fg="green")
+    click.secho(f"\nPlaylist \"{collection}\" — {len(tracks)} tracks:", fg="green")
     for t in tracks:
         click.echo(f"  - {t['artist']} - {t['title']}")
     items = [f"{t['artist']} - {t['title']}" for t in tracks]
@@ -379,15 +379,15 @@ async def _playlist(url, dry_run, service, country, downscale, out, hidden,
         os.makedirs(INPUTS, exist_ok=True)
         with open(os.path.join(INPUTS, "playlist.txt"), "w", encoding="utf-8") as f:
             f.write("\n".join(items) + "\n")
-        click.echo("(liste écrite dans inputs/playlist.txt)")
+        click.echo("(list written to inputs/playlist.txt)")
     except Exception:
         pass
 
     if dry_run:
-        click.secho("--dry-run : pas de téléchargement.", fg="yellow")
+        click.secho("--dry-run: no download.", fg="yellow")
         return
-    click.secho(f"\nTéléchargement de {len(items)} titres via {service} ({jobs} en //) "
-                f"→ dossier «{collection}»…", fg="cyan")
+    click.secho(f"\nDownloading {len(items)} tracks via {service} ({jobs} in //) "
+                f"→ folder \"{collection}\"…", fg="cyan")
     await _run(items, "track", service, country, downscale, out, hidden, jobs,
                dedup=True, organize_on=organize_on, to_fmt=to_fmt, bitrate=bitrate,
                keep_orig=keep_orig, collection=collection, force=force)
@@ -395,12 +395,12 @@ async def _playlist(url, dry_run, service, country, downscale, out, hidden,
 
 @cli.command("playlist")
 @click.argument("url")
-@click.option("--dry-run", is_flag=True, help="Lister les titres sans télécharger.")
+@click.option("--dry-run", is_flag=True, help="List the tracks without downloading.")
 @_service_opts
 def playlist_cmd(url, dry_run, service, country, downscale, out, organize_on, jobs,
                  to_fmt, bitrate, keep_orig, force, hidden):
-    """Importe une playlist Apple Music (lien public) → télécharge chaque titre via lucida.
-    (Spotify/Deezer/Tidal codés mais désactivés pour l'instant.)"""
+    """Import an Apple Music playlist (public link) → download each track via lucida.
+    (Spotify/Deezer/Tidal coded but disabled for now.)"""
     asyncio.run(_playlist(url, dry_run, service, country, downscale, out, hidden,
                           jobs, organize_on, to_fmt=to_fmt, bitrate=bitrate,
                           keep_orig=keep_orig, force=force))
@@ -410,46 +410,46 @@ def playlist_cmd(url, dry_run, service, country, downscale, out, organize_on, jo
 
 @cli.command("config")
 @click.option("--music", "music", default=None,
-              help="Définit le dossier de téléchargement (sauvegardé). Ex: \"D:/Musique\".")
+              help="Set the download folder (saved). E.g. \"D:/Music\".")
 def config_cmd(music):
-    """Affiche/modifie la configuration (dossier de musique, chemins de données)."""
+    """Show/edit the configuration (music folder, data paths)."""
     if music:
         newdir = paths.set_music_dir(music)
         try:
             os.makedirs(newdir, exist_ok=True)
         except Exception as e:
-            click.secho(f"⚠ création impossible: {e}", fg="yellow")
-        click.secho(f"✓ Dossier musique → {newdir}", fg="green")
-    click.echo(f"Musique     : {paths.default_music_dir()}")
-    click.echo(f"Données     : {paths.DATA_DIR}")
-    click.echo(f"État/dédup  : {paths.STATE_PATH}")
-    click.echo(f"Journal     : {paths.LOG_PATH}")
-    click.echo(f"Échecs      : {paths.FAILED_PATH}")
+            click.secho(f"⚠ couldn't create: {e}", fg="yellow")
+        click.secho(f"✓ Music folder → {newdir}", fg="green")
+    click.echo(f"Music       : {paths.default_music_dir()}")
+    click.echo(f"Data        : {paths.DATA_DIR}")
+    click.echo(f"State/dedup : {paths.STATE_PATH}")
+    click.echo(f"Log         : {paths.LOG_PATH}")
+    click.echo(f"Failures    : {paths.FAILED_PATH}")
     click.echo(f"Config      : {paths.CONFIG_PATH}")
     if not music:
-        click.secho("Astuce : `lucida config --music \"D:/Musique\"` pour changer le dossier "
-                    "(ou la variable LUCIDADL_MUSIC).", fg="cyan")
+        click.secho("Tip: `lucida config --music \"D:/Music\"` to change the folder "
+                    "(or the LUCIDADL_MUSIC variable).", fg="cyan")
 
 
 # --- setup / doctor / debug -------------------------------------------------
 
 async def _setup():
-    click.echo("Ouverture du navigateur… (résous un éventuel captcha)")
+    click.echo("Opening the browser… (solve any captcha)")
     try:
         await acquire_clearance(hidden=False)  # clears CF and SAVES the cookie to disk
     except BrowserClosed:
         click.secho(_CLOSED_HINT, fg="red")
         return
     except Exception as e:
-        click.secho(f"⚠ {e} — réessaie `setup`.", fg="yellow")
+        click.secho(f"⚠ {e} — try `setup` again.", fg="yellow")
         return
-    click.secho("✓ Cloudflare passé, cookie mémorisé (les téléchargements n'ouvriront "
-                "plus de navigateur tant qu'il est valide).", fg="green")
+    click.secho("✓ Cloudflare passed, cookie saved (downloads won't open a browser "
+                "anymore as long as it's valid).", fg="green")
 
 
 @cli.command()
 def setup():
-    """Ouvre le navigateur une fois pour passer Cloudflare et mémoriser le cookie."""
+    """Open the browser once to pass Cloudflare and save the cookie."""
     asyncio.run(_setup())
 
 
@@ -457,27 +457,27 @@ async def _doctor():
     click.echo(f"Python      : {sys.version.split()[0]}")
     try:
         import playwright  # noqa
-        click.echo("Playwright  : installé")
+        click.echo("Playwright  : installed")
     except Exception as e:
-        click.secho(f"Playwright  : MANQUANT ({e})", fg="red")
-    click.echo(f"Données     : {paths.DATA_DIR}")
-    click.echo(f"Profil      : {paths.PROFILE_DIR}")
-    click.echo(f"Musique     : {DEFAULT_OUT}")
-    click.echo(f"État/dédup  : {STATE_PATH}")
-    click.echo(f"Journal     : {LOG_PATH}")
-    click.echo("Test navigateur + Cloudflare…")
+        click.secho(f"Playwright  : MISSING ({e})", fg="red")
+    click.echo(f"Data        : {paths.DATA_DIR}")
+    click.echo(f"Profile     : {paths.PROFILE_DIR}")
+    click.echo(f"Music       : {DEFAULT_OUT}")
+    click.echo(f"State/dedup : {STATE_PATH}")
+    click.echo(f"Log         : {LOG_PATH}")
+    click.echo("Testing browser + Cloudflare…")
     try:
         async with lucida_context(headless=False) as ctx:
             ok = await ensure_cleared(ctx, timeout=120)
-            click.secho("✓ lucida.to joignable" if ok else "⚠ Cloudflare non franchi",
+            click.secho("✓ lucida.to reachable" if ok else "⚠ Cloudflare not cleared",
                         fg="green" if ok else "yellow")
     except Exception as e:
-        click.secho(f"✗ Échec lancement navigateur: {e}", fg="red")
+        click.secho(f"✗ Browser launch failed: {e}", fg="red")
 
 
 @cli.command()
 def doctor():
-    """Diagnostique l'environnement et la joignabilité de lucida.to."""
+    """Diagnose the environment and lucida.to reachability."""
     asyncio.run(_doctor())
 
 
@@ -496,13 +496,13 @@ async def _debug(query, service, country, item, headless):
     async with lucida_context(headless=headless, downloads_dir=DEFAULT_OUT) as ctx:
         try:
             if not await ensure_cleared(ctx, timeout=180):
-                click.secho("Cloudflare non franchi.", fg="red")
+                click.secho("Cloudflare not cleared.", fg="red")
                 return
         except BrowserClosed:
             click.secho(_CLOSED_HINT, fg="red")
             return
         page = await get_page(ctx)
-        click.echo(f"Navigation: {target}")
+        click.echo(f"Navigating: {target}")
         try:
             await page.goto(target, wait_until="networkidle", timeout=60_000)
         except Exception as e:
@@ -515,11 +515,11 @@ async def _debug(query, service, country, item, headless):
             await page.screenshot(path=paths.cwd(f"{tag}_debug.png"), full_page=True)
         except Exception:
             pass
-        click.echo(f"  HTML {len(html)} octets -> {tag}_debug.html (+ .png)")
+        click.echo(f"  HTML {len(html)} bytes -> {tag}_debug.html (+ .png)")
         for m in ('const data = [', 'songs-list-row', 'button.download-button',
                   'download-button'):
-            click.echo(f"  marqueur {m!r}: {'OUI' if m in html else 'non'}")
-        click.secho("Fenêtre laissée OUVERTE. Entrée pour fermer.", fg="yellow")
+            click.echo(f"  marker {m!r}: {'YES' if m in html else 'no'}")
+        click.secho("Window left OPEN. Press Enter to close.", fg="yellow")
         try:
             await asyncio.to_thread(input)
         except Exception:
@@ -528,12 +528,12 @@ async def _debug(query, service, country, item, headless):
 
 @cli.command("debug")
 @click.argument("query", nargs=-1)
-@click.option("-s", "--service", default="qobuz", help="Service à diagnostiquer (def: qobuz).")
-@click.option("--country", default=None, help="Code pays (def: US pour qobuz).")
-@click.option("--item", default=None, help="Charger cette URL d'item au lieu d'une recherche.")
-@click.option("--headless", is_flag=True, help="(dev) forcer le headless, normalement bloqué par CF.")
+@click.option("-s", "--service", default="qobuz", help="Service to diagnose (def: qobuz).")
+@click.option("--country", default=None, help="Country code (def: US for qobuz).")
+@click.option("--item", default=None, help="Load this item URL instead of a search.")
+@click.option("--headless", is_flag=True, help="(dev) force headless, normally blocked by CF.")
 def debug_cmd(query, service, country, item, headless):
-    """(dev) Diagnostic : ouvre une page, capture HTML + screenshot, garde la fenêtre ouverte."""
+    """(dev) Diagnostic: open a page, capture HTML + screenshot, keep the window open."""
     asyncio.run(_debug(query, service, country, item, headless))
 
 

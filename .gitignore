@@ -19,15 +19,27 @@ lucida-flow/
 .userdata/
 .state.json
 state.json
+state.json.bad
+config.json
 clearance.json
 run.log
 failed.txt
 downloads/
+music/
 inputs/tracks.txt
 inputs/albums.txt
 inputs/playlist.txt
 *_debug.html
 *_debug.png
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editors
+.idea/
+.vscode/
 
 # OS
 .DS_Store

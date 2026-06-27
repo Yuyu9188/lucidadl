@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question / usage help
+    url: https://github.com/Jude-A/lucidadl/discussions
+    about: For questions and usage help, please open a Discussion rather than an issue.

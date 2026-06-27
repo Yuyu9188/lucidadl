@@ -14,9 +14,9 @@ from .api import _long
 AUDIO_EXT = {".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".alac", ".aiff", ".aif"}
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 
-# Top-level grouping under the music root: albums/tracks live under Artistes/<Artist>/…,
+# Top-level grouping under the music root: albums/tracks live under Artists/<Artist>/…,
 # playlists live under Playlists/<Playlist name>/ — so the two never mix.
-ARTISTS_DIR = "Artistes"
+ARTISTS_DIR = "Artists"
 PLAYLISTS_DIR = "Playlists"
 
 try:  # mutagen is a hard dep; a missing/broken install must be VISIBLE, not silent
@@ -89,7 +89,7 @@ def place_file(path: str, music_root: str, collection: str = None,
     `meta` (API-derived artist/album) is a fallback used only when embedded tags
     are missing; `collection` takes priority over both. Playlists go under
     <music_root>/Playlists/<collection>/, everything else under
-    <music_root>/Artistes/<Artist>/<Album>/."""
+    <music_root>/Artists/<Artist>/<Album>/."""
     if collection:
         dest_dir = os.path.join(music_root, PLAYLISTS_DIR, utils.sanitize(collection))
     else:

@@ -114,8 +114,8 @@ def _junk(name):
         fh.write(b"not a real flac")
     return p
 _pf = _org.place_file(_junk("a.flac"), _d2, meta={"albumartist": "Daft Punk", "album": "Discovery"})
-check("place_file: album under Artistes/<Artist>/<Album> via meta",
-      _os.path.dirname(_pf).replace("\\", "/").endswith("/Artistes/Daft Punk/Discovery"))
+check("place_file: album under Artists/<Artist>/<Album> via meta",
+      _os.path.dirname(_pf).replace("\\", "/").endswith("/Artists/Daft Punk/Discovery"))
 _pf = _org.place_file(_junk("b.flac"), _d2, collection="MyMix",
                       meta={"albumartist": "Daft Punk", "album": "Discovery"})
 check("place_file: playlist under Playlists/<name> (collection beats meta)",

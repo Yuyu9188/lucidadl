@@ -67,10 +67,10 @@ def load_config() -> dict:
             data = json.load(f)
     except Exception as e:
         # An EXISTING but corrupt config would silently send downloads to the wrong dir.
-        _warn_config(f"⚠ config illisible ({CONFIG_PATH}: {e}) — paramètres ignorés.\n")
+        _warn_config(f"⚠ config unreadable ({CONFIG_PATH}: {e}) — settings ignored.\n")
         return {}
     if not isinstance(data, dict):  # valid JSON but wrong shape — don't drop it silently
-        _warn_config(f"⚠ config invalide ({CONFIG_PATH}: pas un objet JSON) — ignorée.\n")
+        _warn_config(f"⚠ invalid config ({CONFIG_PATH}: not a JSON object) — ignored.\n")
         return {}
     return data
 
