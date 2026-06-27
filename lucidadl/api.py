@@ -218,7 +218,8 @@ class LucidaClient:
         raise LucidaError("échec /api/load")
 
     async def run_job(self, handoff: str, server: str, dest_dir: str, base_name: str,
-                      title: str = "", timeout: int = 1800) -> str:
+                      title: str = "", timeout: int = 1800,
+                      on_status=None, on_bytes=None) -> str:
         base = f"https://{server}.lucida.to/api/fetch/request/{handoff}"
         deadline = time.time() + timeout
         last_msg = None
@@ -240,7 +241,10 @@ class LucidaClient:
                 raise LucidaError(f"serveur lucida: {msg or 'erreur'}")
             if msg and msg != last_msg:
                 last_msg = msg
-                self.log(f"    … {msg}")
+                if on_status:
+                    on_status(msg)
+                else:
+                    self.log(f"    … {msg}")
             state = (status, msg)
             if state != last_state:
                 last_state, last_change = state, time.time()
@@ -262,9 +266,20 @@ class LucidaClient:
             dest = self._unique_dest(dest_dir, fname)
             part = _long(dest + ".part")
             try:
+                total = None
+                try:
+                    total = int(headers.get("content-length")) or None
+                except (TypeError, ValueError):
+                    total = None
+                done = 0
+                if on_bytes:
+                    on_bytes(0, total)
                 with open(part, "wb") as f:
                     async for chunk in resp.aiter_bytes(1 << 16):
                         f.write(chunk)
+                        if on_bytes:
+                            done += len(chunk)
+                            on_bytes(done, total)
                 os.replace(part, _long(dest))
             except BaseException as e:  # OSError, httpx errors, CancelledError…
                 self._claimed.discard(dest)  # free the name so a retry reuses it
@@ -353,7 +368,7 @@ _APPLE_SCROLL_JS = """() => {
 }"""
 
 
-async def applemusic_tracklist(page, url: str, log=print) -> List[Dict[str, str]]:
+async def applemusic_tracklist(page, url: str, log=print):
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
     except Exception as e:
@@ -365,6 +380,7 @@ async def applemusic_tracklist(page, url: str, log=print) -> List[Dict[str, str]
     except Exception:
         pass
 
+    name = await _playlist_name(page)
     tracks: List[Dict[str, str]] = []
     seen = set()
     stable = 0
@@ -395,7 +411,30 @@ async def applemusic_tracklist(page, url: str, log=print) -> List[Dict[str, str]
         stable = stable + 1 if new == 0 else 0
         if (at_bottom and stable >= 3) or stable >= 30:
             break
-    return tracks
+    return name, tracks
+
+
+async def _playlist_name(page) -> str:
+    """Best-effort playlist title from the page (heading, else document.title)."""
+    for sel in ('[data-testid="non-editable-product-title"]', ".headings__title",
+                "h1.product-name", "h1"):
+        try:
+            el = page.locator(sel).first
+            if await el.count():
+                t = (await el.inner_text()).strip()
+                if t:
+                    return " ".join(t.split())[:120]
+        except Exception:
+            continue
+    try:
+        t = (await page.title()).strip()
+        for suf in (" on Apple Music", " - playlist by ", " | Spotify", " | Deezer"):
+            i = t.find(suf)
+            if i > 0:
+                t = t[:i]
+        return " ".join(t.split()).strip(" -|·")[:120]
+    except Exception:
+        return ""
 
 
 async def _dismiss_consent(page) -> None:
@@ -465,8 +504,8 @@ def _playlist_source(url: str):
 _PLAYLIST_OTHERS_ENABLED = False
 
 
-async def playlist_tracklist(page, url: str, log=print) -> List[Dict[str, str]]:
-    """Scrape a public playlist's tracklist (title + artist). Only Apple Music is
+async def playlist_tracklist(page, url: str, log=print):
+    """Scrape a public playlist -> (name, [{title, artist}]). Only Apple Music is
     active for now; Spotify/Deezer/Tidal are coded but disabled (_PLAYLIST_OTHERS_ENABLED)."""
     from urllib.parse import urlparse
     host = (urlparse(url).hostname or "").lower()
@@ -475,15 +514,15 @@ async def playlist_tracklist(page, url: str, log=print) -> List[Dict[str, str]]:
     if not _PLAYLIST_OTHERS_ENABLED:
         log("  source non supportée pour l'instant — seul Apple Music est actif "
             "(Spotify/Deezer/Tidal à venir).")
-        return []
+        return "", []
     src, sel = _playlist_source(url)
     if not sel:
         log(f"  source de playlist non reconnue: {host or url}")
-        return []
+        return "", []
     return await _scrape_playlist(page, url, sel, src, log)
 
 
-async def _scrape_playlist(page, url, sel, label, log) -> List[Dict[str, str]]:
+async def _scrape_playlist(page, url, sel, label, log):
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
     except Exception as e:
@@ -495,6 +534,7 @@ async def _scrape_playlist(page, url, sel, label, log) -> List[Dict[str, str]]:
     except Exception:
         pass
 
+    name = await _playlist_name(page)
     tracks: List[Dict[str, str]] = []
     seen = set()
     stable = 0
@@ -528,7 +568,7 @@ async def _scrape_playlist(page, url, sel, label, log) -> List[Dict[str, str]]:
             break
     if not tracks:
         await _dump_playlist_debug(page, label)
-    return tracks
+    return name, tracks
 
 
 async def _dump_playlist_debug(page, label) -> None:

@@ -10,18 +10,20 @@ from typing import List, Optional
 
 import click
 
-from . import api, paths, transcode, utils
+from . import api, organize, paths, progress, transcode, utils
 from .api import LucidaClient, default_country, normalize_service, DOWNSCALE_CHOICES, LUCIDA
 from .downloader import run_batch
 from .session import (lucida_context, ensure_cleared, get_page, BrowserClosed,
                       acquire_clearance, load_clearance)
 
-# App data (persistent, install-independent) in the user data dir; working files in cwd.
+# App data (cookie/profile/state/log/failed list) lives in the fixed user data dir.
+# Downloads go to ONE fixed, configurable music directory (never the cwd). Only the
+# watchlist inputs stay next to you, so you can edit them where you work.
 STATE_PATH = paths.STATE_PATH
-DEFAULT_OUT = paths.cwd("downloads")
+DEFAULT_OUT = paths.default_music_dir()
 INPUTS = paths.cwd("inputs")
-LOG_PATH = paths.cwd("run.log")
-FAILED_PATH = paths.cwd("failed.txt")
+LOG_PATH = paths.LOG_PATH
+FAILED_PATH = paths.FAILED_PATH
 
 
 def _write_failed(items) -> None:
@@ -29,8 +31,12 @@ def _write_failed(items) -> None:
         with open(FAILED_PATH, "w", encoding="utf-8") as f:
             f.write("# Items en échec — relance avec : lucidadl retry\n")
             f.write("\n".join(items) + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        # don't fail silently: the user is told to `retry`, but the list wasn't saved.
+        click.secho(f"⚠ impossible d'écrire {FAILED_PATH} ({e}) — `retry` n'aura pas ces "
+                    f"items. À relancer manuellement :", fg="yellow")
+        for it in items:
+            click.echo(f"    {it}")
 
 _CLOSED_HINT = (
     "Le navigateur s'est fermé tout seul. Essaie : (1) relancer ; (2) ferme les "
@@ -71,16 +77,32 @@ def _service_opts(f):
                      help="Bitrate pour --to (ex: 320k, 256k, 192k).")(f)
     f = click.option("--keep-original", "keep_orig", is_flag=True,
                      help="Garder le FLAC d'origine à côté du fichier transcodé.")(f)
+    f = click.option("--force", "force", is_flag=True,
+                     help="Ignorer la mémoire de dédup et (re)télécharger, même si déjà "
+                          "fait (utile après avoir supprimé des fichiers).")(f)
     f = click.option("--hidden/--visible", "hidden", default=False,
                      help="--hidden = fenêtre hors-écran si un passage Cloudflare est requis "
                           "(sinon aucun navigateur ne s'ouvre). Défaut: visible.")(f)
     return f
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option(message="lucidadl %(version)s")
-def cli():
-    """Téléchargeur lucida.to en HTTP parallèle (navigateur requis seulement pour Cloudflare)."""
+@click.pass_context
+def cli(ctx):
+    """Téléchargeur lucida.to en HTTP parallèle (navigateur requis seulement pour Cloudflare).
+
+    Sans argument, ouvre le menu interactif (`lucida ui`)."""
+    if ctx.invoked_subcommand is None:
+        from . import tui
+        tui.run()
+
+
+@cli.command("ui")
+def ui_cmd():
+    """Menu interactif : télécharger, rechercher, importer une playlist, régler."""
+    from . import tui
+    tui.run()
 
 
 # --- shared async runners ---------------------------------------------------
@@ -88,10 +110,13 @@ def cli():
 async def _run(items: List[str], kind: str, service: str, country: Optional[str],
                downscale: str, out: str, hidden: bool, jobs: int, dedup: bool,
                organize_on: bool = True, to_fmt: Optional[str] = None,
-               bitrate: Optional[str] = None, keep_orig: bool = False) -> None:
+               bitrate: Optional[str] = None, keep_orig: bool = False,
+               collection: Optional[str] = None, force: bool = False) -> None:
     if not items:
         click.secho("Rien à télécharger.", fg="yellow")
         return
+    if force:
+        dedup = False  # re-download even what state.json remembers
     cc = country or default_country(service)
     # When transcoding locally, pull the best source (FLAC) from lucida.
     tx = None
@@ -102,18 +127,15 @@ async def _run(items: List[str], kind: str, service: str, country: Optional[str]
             click.secho("⚠ ffmpeg introuvable — installe-le (pip install imageio-ffmpeg) "
                         "ou enlève --to.", fg="red")
             return
+    if organize_on and not organize.mutagen_available():
+        click.secho("⚠ mutagen introuvable — les tags ne peuvent pas être lus ; le tri "
+                    "par artiste/album s'appuiera sur les métadonnées de l'API (sinon "
+                    "« Unknown »). Installe-le : pip install mutagen", fg="yellow")
     os.makedirs(out, exist_ok=True)
     state = utils.State(STATE_PATH)
     logf = open(LOG_PATH, "w", encoding="utf-8")
-
-    def log(msg: object = "") -> None:
-        s = str(msg)
-        click.echo(s)
-        try:
-            logf.write(s + "\n")
-            logf.flush()
-        except Exception:
-            pass
+    reporter = progress.make_reporter(echo=click.echo, logfile=logf)
+    log = reporter.log
 
     log(f"# lucidadl — kind={kind} service={service} country={cc!r} "
         f"format={downscale} jobs={jobs} dedup={dedup} "
@@ -142,23 +164,28 @@ async def _run(items: List[str], kind: str, service: str, country: Optional[str]
         log(f"Téléchargement de {len(items)} élément(s) — {jobs} en parallèle (sans navigateur)…")
         try:
             totals, failed = await run_batch(client, state, items, kind, service, cc, out,
-                                             jobs, dedup, organize_on, tx, log=log)
+                                             jobs, dedup, organize_on, tx,
+                                             collection=collection, reporter=reporter)
         finally:
             await client.aclose()
         log(f"\nTerminé — OK:{totals['ok']}  ignorés:{totals['skip']}  échecs:{totals['fail']}")
         if failed:
             _write_failed(failed)
-            log(f"  → {len(failed)} échec(s) écrits dans failed.txt "
-                f"(relance : run.cmd retry)")
+            log(f"  → {len(failed)} échec(s) écrits dans {FAILED_PATH} "
+                f"(relance : lucida retry)")
     except Exception as e:
         log(f"ERREUR FATALE: {e}")
         log(traceback.format_exc())
     finally:
         try:
+            reporter.close()
+        except Exception:
+            pass
+        try:
             logf.close()
         except Exception:
             pass
-    click.secho("→ Journal écrit dans run.log", fg="cyan")
+    click.secho(f"→ Fichiers dans {out}  ·  journal : {LOG_PATH}", fg="cyan")
 
 
 # --- ad-hoc (singulier) : args, sans dédup ---------------------------------
@@ -167,22 +194,22 @@ async def _run(items: List[str], kind: str, service: str, country: Optional[str]
 @click.argument("items", nargs=-1, required=True)
 @_service_opts
 def track_cmd(items, service, country, downscale, out, organize_on, jobs, to_fmt,
-              bitrate, keep_orig, hidden):
+              bitrate, keep_orig, force, hidden):
     """Un/des titre(s) maintenant : track "artiste - titre" (ou URL). Force le DL."""
     asyncio.run(_run(list(items), "track", service, country, downscale, out,
                      hidden, jobs, dedup=False, organize_on=organize_on,
-                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig))
+                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig, force=force))
 
 
 @cli.command("album")
 @click.argument("items", nargs=-1, required=True)
 @_service_opts
 def album_cmd(items, service, country, downscale, out, organize_on, jobs,
-              to_fmt, bitrate, keep_orig, hidden):
+              to_fmt, bitrate, keep_orig, force, hidden):
     """Un/des album(s) maintenant : album "artiste - album" (ou URL), déroulé piste par piste."""
     asyncio.run(_run(list(items), "album", service, country, downscale, out,
                      hidden, jobs, dedup=False, organize_on=organize_on,
-                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig))
+                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig, force=force))
 
 
 # --- watchlist (pluriel) : fichier, avec dédup -----------------------------
@@ -192,11 +219,11 @@ def album_cmd(items, service, country, downscale, out, organize_on, jobs,
               help="Fichier de titres/URLs, un par ligne (def: inputs/tracks.txt).")
 @_service_opts
 def tracks_cmd(file, service, country, downscale, out, organize_on, jobs, to_fmt,
-               bitrate, keep_orig, hidden):
+               bitrate, keep_orig, force, hidden):
     """Watchlist titres : télécharge inputs/tracks.txt (dédup activée)."""
     asyncio.run(_run(_read_lines(file), "track", service, country, downscale, out,
                      hidden, jobs, dedup=True, organize_on=organize_on,
-                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig))
+                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig, force=force))
 
 
 @cli.command("albums")
@@ -204,17 +231,17 @@ def tracks_cmd(file, service, country, downscale, out, organize_on, jobs, to_fmt
               help="Fichier d'albums/URLs, un par ligne (def: inputs/albums.txt).")
 @_service_opts
 def albums_cmd(file, service, country, downscale, out, organize_on, jobs,
-               to_fmt, bitrate, keep_orig, hidden):
+               to_fmt, bitrate, keep_orig, force, hidden):
     """Watchlist albums : télécharge inputs/albums.txt (dédup activée)."""
     asyncio.run(_run(_read_lines(file), "album", service, country, downscale, out,
                      hidden, jobs, dedup=True, organize_on=organize_on,
-                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig))
+                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig, force=force))
 
 
 @cli.command("retry")
 @_service_opts
 def retry_cmd(service, country, downscale, out, organize_on, jobs, to_fmt,
-              bitrate, keep_orig, hidden):
+              bitrate, keep_orig, force, hidden):
     """Relance les items en échec du dernier run (failed.txt)."""
     items = _read_lines(FAILED_PATH)
     if not items:
@@ -222,13 +249,32 @@ def retry_cmd(service, country, downscale, out, organize_on, jobs, to_fmt,
         return
     asyncio.run(_run(items, "track", service, country, downscale, out,
                      hidden, jobs, dedup=True, organize_on=organize_on,
-                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig))
+                     to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig, force=force))
 
 
 # --- interactive search ----------------------------------------------------
 
+async def _search_entries(query, service, hidden=False):
+    """Run a search and return a flat list of (kind, item) entries (albums then tracks).
+    Shared by the CLI `search` prompt and the TUI's arrow-key picker."""
+    cc = default_country(service)
+    cf, ua = load_clearance()
+    if not (cf and ua):
+        cf, ua = await acquire_clearance(hidden=hidden)
+    client = LucidaClient(cf, ua, acquire=lambda: acquire_clearance(hidden=hidden),
+                          country=cc, log=click.echo)
+    await client.start_http()
+    try:
+        res = await client.search(query, service)
+    finally:
+        await client.aclose()
+    entries = [("album", it) for it in (res.get("albums") or [])[:15]]
+    entries += [("track", it) for it in (res.get("tracks") or [])[:15]]
+    return entries
+
+
 async def _search(query, service, country, downscale, out, organize_on, jobs,
-                  to_fmt, bitrate, keep_orig, hidden):
+                  to_fmt, bitrate, keep_orig, hidden, force=False):
     cc = country or default_country(service)
     cf, ua = load_clearance()
     if not (cf and ua):
@@ -272,30 +318,47 @@ async def _search(query, service, country, downscale, out, organize_on, jobs,
     kind, item = entries[int(sel) - 1]
     await _run([item["url"]], kind, service, country, downscale, out, hidden, jobs,
                dedup=False, organize_on=organize_on, to_fmt=to_fmt, bitrate=bitrate,
-               keep_orig=keep_orig)
+               keep_orig=keep_orig, force=force)
 
 
 @cli.command("search")
 @click.argument("query", nargs=-1, required=True)
 @_service_opts
 def search_cmd(query, service, country, downscale, out, organize_on, jobs,
-               to_fmt, bitrate, keep_orig, hidden):
+               to_fmt, bitrate, keep_orig, force, hidden):
     """Recherche interactive : liste les résultats, télécharge celui que tu choisis."""
     asyncio.run(_search(" ".join(query), service, country, downscale, out, organize_on,
-                        jobs, to_fmt, bitrate, keep_orig, hidden))
+                        jobs, to_fmt, bitrate, keep_orig, hidden, force=force))
 
 
 # --- playlist import (Apple Music / Spotify / Deezer / Tidal) --------------
 
 async def _playlist(url, dry_run, service, country, downscale, out, hidden,
-                    jobs, organize_on=True, to_fmt=None, bitrate=None, keep_orig=False):
+                    jobs, organize_on=True, to_fmt=None, bitrate=None, keep_orig=False,
+                    force=False):
     cc = country or default_country(service)
-    click.echo("Lecture de la playlist (navigateur)…")
-    tracks = []
-    try:
-        async with lucida_context(hidden=hidden) as ctx:  # browser only for the source page
+    name, tracks = "", []
+
+    async def _scrape(headless: bool):
+        # Apple Music is NOT behind Cloudflare, so the tracklist can be scraped headless
+        # (no visible window). `hidden` only matters for the headed fallback.
+        async with lucida_context(headless=headless,
+                                  hidden=(hidden and not headless)) as ctx:
             page = await get_page(ctx)
-            tracks = await api.playlist_tracklist(page, url, click.echo)
+            return await api.playlist_tracklist(page, url, click.echo)
+
+    try:
+        click.echo("Lecture de la playlist (navigateur headless)…")
+        try:
+            name, tracks = await _scrape(headless=True)
+        except BrowserClosed:
+            raise
+        except Exception as e:
+            click.secho(f"  headless: {e}", fg="yellow")  # fall through to the headed retry
+        if not tracks:
+            click.secho("Headless infructueux — nouvelle tentative en fenêtre visible…",
+                        fg="yellow")
+            name, tracks = await _scrape(headless=False)
     except BrowserClosed:
         click.secho(_CLOSED_HINT, fg="red")
         return
@@ -307,7 +370,8 @@ async def _playlist(url, dry_run, service, country, downscale, out, hidden,
         click.secho("Aucun titre extrait (un <source>_debug.html a pu être écrit).", fg="red")
         return
 
-    click.secho(f"\n{len(tracks)} titres trouvés :", fg="green")
+    collection = name or "Playlist"
+    click.secho(f"\nPlaylist «{collection}» — {len(tracks)} titres :", fg="green")
     for t in tracks:
         click.echo(f"  - {t['artist']} - {t['title']}")
     items = [f"{t['artist']} - {t['title']}" for t in tracks]
@@ -322,10 +386,11 @@ async def _playlist(url, dry_run, service, country, downscale, out, hidden,
     if dry_run:
         click.secho("--dry-run : pas de téléchargement.", fg="yellow")
         return
-    click.secho(f"\nTéléchargement de {len(items)} titres via {service} ({jobs} en //)…", fg="cyan")
+    click.secho(f"\nTéléchargement de {len(items)} titres via {service} ({jobs} en //) "
+                f"→ dossier «{collection}»…", fg="cyan")
     await _run(items, "track", service, country, downscale, out, hidden, jobs,
                dedup=True, organize_on=organize_on, to_fmt=to_fmt, bitrate=bitrate,
-               keep_orig=keep_orig)
+               keep_orig=keep_orig, collection=collection, force=force)
 
 
 @cli.command("playlist")
@@ -333,11 +398,37 @@ async def _playlist(url, dry_run, service, country, downscale, out, hidden,
 @click.option("--dry-run", is_flag=True, help="Lister les titres sans télécharger.")
 @_service_opts
 def playlist_cmd(url, dry_run, service, country, downscale, out, organize_on, jobs,
-                 to_fmt, bitrate, keep_orig, hidden):
+                 to_fmt, bitrate, keep_orig, force, hidden):
     """Importe une playlist Apple Music (lien public) → télécharge chaque titre via lucida.
     (Spotify/Deezer/Tidal codés mais désactivés pour l'instant.)"""
     asyncio.run(_playlist(url, dry_run, service, country, downscale, out, hidden,
-                          jobs, organize_on, to_fmt=to_fmt, bitrate=bitrate, keep_orig=keep_orig))
+                          jobs, organize_on, to_fmt=to_fmt, bitrate=bitrate,
+                          keep_orig=keep_orig, force=force))
+
+
+# --- config -----------------------------------------------------------------
+
+@cli.command("config")
+@click.option("--music", "music", default=None,
+              help="Définit le dossier de téléchargement (sauvegardé). Ex: \"D:/Musique\".")
+def config_cmd(music):
+    """Affiche/modifie la configuration (dossier de musique, chemins de données)."""
+    if music:
+        newdir = paths.set_music_dir(music)
+        try:
+            os.makedirs(newdir, exist_ok=True)
+        except Exception as e:
+            click.secho(f"⚠ création impossible: {e}", fg="yellow")
+        click.secho(f"✓ Dossier musique → {newdir}", fg="green")
+    click.echo(f"Musique     : {paths.default_music_dir()}")
+    click.echo(f"Données     : {paths.DATA_DIR}")
+    click.echo(f"État/dédup  : {paths.STATE_PATH}")
+    click.echo(f"Journal     : {paths.LOG_PATH}")
+    click.echo(f"Échecs      : {paths.FAILED_PATH}")
+    click.echo(f"Config      : {paths.CONFIG_PATH}")
+    if not music:
+        click.secho("Astuce : `lucida config --music \"D:/Musique\"` pour changer le dossier "
+                    "(ou la variable LUCIDADL_MUSIC).", fg="cyan")
 
 
 # --- setup / doctor / debug -------------------------------------------------
@@ -369,8 +460,11 @@ async def _doctor():
         click.echo("Playwright  : installé")
     except Exception as e:
         click.secho(f"Playwright  : MANQUANT ({e})", fg="red")
-    click.echo(f"Profil      : {os.path.join(ROOT, '.userdata', 'profile')}")
-    click.echo(f"Sortie      : {DEFAULT_OUT}")
+    click.echo(f"Données     : {paths.DATA_DIR}")
+    click.echo(f"Profil      : {paths.PROFILE_DIR}")
+    click.echo(f"Musique     : {DEFAULT_OUT}")
+    click.echo(f"État/dédup  : {STATE_PATH}")
+    click.echo(f"Journal     : {LOG_PATH}")
     click.echo("Test navigateur + Cloudflare…")
     try:
         async with lucida_context(headless=False) as ctx:
@@ -415,10 +509,10 @@ async def _debug(query, service, country, item, headless):
             click.echo(f"goto: {e}")
         await page.wait_for_timeout(4000)
         html = await page.content()
-        with open(os.path.join(ROOT, f"{tag}_debug.html"), "w", encoding="utf-8") as f:
+        with open(paths.cwd(f"{tag}_debug.html"), "w", encoding="utf-8") as f:
             f.write(html)
         try:
-            await page.screenshot(path=os.path.join(ROOT, f"{tag}_debug.png"), full_page=True)
+            await page.screenshot(path=paths.cwd(f"{tag}_debug.png"), full_page=True)
         except Exception:
             pass
         click.echo(f"  HTML {len(html)} octets -> {tag}_debug.html (+ .png)")

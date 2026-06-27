@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -42,28 +43,64 @@ def year_of(rfc3339: Optional[str]) -> Optional[str]:
     return m.group(1) if m else None
 
 
+def _path_exists(path: str) -> bool:
+    """os.path.exists with Windows extended-length prefix (utils can't import api)."""
+    if not path:
+        return False
+    try:
+        if os.name == "nt":
+            ap = os.path.abspath(path)
+            if not ap.startswith("\\\\?\\"):
+                ap = "\\\\?\\" + ap
+            return os.path.exists(ap)
+        return os.path.exists(path)
+    except OSError:
+        return False
+
+
 class State:
-    """Remembers which item URLs were already downloaded (skip on re-run)."""
+    """Remembers which track URLs were already downloaded, *and where the file landed*,
+    so a re-run skips an item only while its file still exists on disk. Delete the file
+    → it is re-downloaded. Legacy state (no recorded path) is treated as 'done'."""
 
     def __init__(self, path: str):
         self.path = path
         self._lock = threading.Lock()
-        self.done = set()
+        self.done: Dict[str, str] = {}   # url -> final file path ("" = unknown/legacy)
         self._inflight = set()
         if os.path.exists(path):
             try:
                 with open(path, encoding="utf-8") as f:
-                    self.done = set(json.load(f).get("done", []))
-            except Exception:
-                self.done = set()
+                    raw = json.load(f).get("done", [])
+                if isinstance(raw, dict):
+                    self.done = {str(k): str(v or "") for k, v in raw.items()}
+                else:  # legacy: a plain list of URLs, no paths
+                    self.done = {str(k): "" for k in raw}
+            except Exception as e:
+                # The file EXISTS but is unreadable: don't silently drop the whole dedup
+                # history (the next add() would overwrite it). Back it up and warn.
+                self.done = {}
+                bak = path + ".bad"
+                try:
+                    os.replace(path, bak)
+                except OSError:
+                    bak = path
+                sys.stderr.write(
+                    f"⚠ état de dédup illisible ({path}: {e}) — sauvegardé en {bak} puis "
+                    f"réinitialisé ; des doublons sont possibles ce run.\n")
 
     def has(self, key: str) -> bool:
-        return key in self.done
+        """True if this URL counts as already-downloaded. A recorded path that no
+        longer exists on disk does NOT count (the user deleted it → re-download)."""
+        if key not in self.done:
+            return False
+        p = self.done[key]
+        return _path_exists(p) if p else True
 
     def reserve(self, key: str) -> bool:
         """Atomically claim a key (asyncio single-thread: no await inside).
-        Returns False if already downloaded or currently in flight."""
-        if key in self.done or key in self._inflight:
+        Returns False if already downloaded (and present) or currently in flight."""
+        if key in self._inflight or self.has(key):
             return False
         self._inflight.add(key)
         return True
@@ -71,11 +108,11 @@ class State:
     def release(self, key: str) -> None:
         self._inflight.discard(key)
 
-    def add(self, key: str) -> None:
+    def add(self, key: str, path: str = "") -> None:
         with self._lock:
-            self.done.add(key)
+            self.done[key] = path or self.done.get(key) or ""
             self._inflight.discard(key)
             tmp = self.path + f".{os.getpid()}.tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"done": sorted(self.done)}, f, ensure_ascii=False, indent=2)
+                json.dump({"done": self.done}, f, ensure_ascii=False, indent=2)
             os.replace(tmp, self.path)

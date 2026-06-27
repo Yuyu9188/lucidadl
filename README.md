@@ -20,10 +20,15 @@ want, and import playlists.
   native album zip).
 - **Local transcoding** with ffmpeg (`--to mp3 --bitrate 320k`) — bundled, nothing to
   install. Tags and cover art preserved.
-- **Tag-based organization** into `Artist/Album/…`.
-- **Watchlists** with dedup (`tracks` / `albums` read a file, skip what's done).
+- **Tag-based organization** into `Artistes/<Artist>/<Album>/…` (falls back to the
+  source's artist/album metadata when a file has no embedded tags, so nothing lands in
+  "Unknown"); playlists go under `Playlists/<name>/`, kept separate from artists.
+- **Watchlists** with dedup (`tracks` / `albums` read a file, skip what's done — but a
+  file you deleted is re-downloaded; `--force` ignores the memory entirely).
 - **Apple Music playlist import** (public link → tracklist → download via Qobuz).
 - **Interactive search**, **service fallback** (Qobuz → Amazon), **retry** of failures.
+- **Interactive menu** (`lucida ui`, or just `lucida`) and **live progress bars** — one
+  bar per parallel download, in any real terminal.
 
 ## How it works (Cloudflare)
 
@@ -67,11 +72,18 @@ Open a new terminal afterwards so `lucida` is picked up. ffmpeg is bundled
 
 ```bash
 lucida setup                                  # once: pass Cloudflare, cache the cookie
+lucida                                         # interactive menu (same as `lucida ui`)
 lucida track "Red Hot Chili Peppers - Otherside"
 lucida album "Red Hot Chili Peppers - Californication" --to mp3 --bitrate 320k -j 8
 ```
 
-Files land in `./downloads/` by default.
+Prefer a menu? Run `lucida` with no arguments (or `lucida ui`): pick an action, type a
+query/URL, and watch one progress bar per parallel download. Your menu defaults
+(jobs, service, format, folder) are remembered.
+
+Files land in **one fixed folder** — `~/Downloads/music` by default (not the current
+directory, so they never scatter). Change it once with `lucida config --music "D:/Music"`
+(or the `LUCIDADL_MUSIC` env var), or per run with `-o`.
 
 ## Commands
 
@@ -80,13 +92,15 @@ skips already-downloaded items — for unattended/scheduled runs).
 
 | Command | Input | Dedup |
 |---------|-------|-------|
+| `lucida` / `lucida ui` | interactive menu | — |
 | `lucida track "<query\|url>"` | argument(s) | no (force) |
 | `lucida album "<query\|url>"` | argument(s) | no (force) |
 | `lucida tracks` | `./inputs/tracks.txt` | yes |
 | `lucida albums` | `./inputs/albums.txt` | yes |
 | `lucida playlist "<apple music url>"` | public playlist | yes |
 | `lucida search "<query>"` | interactive pick | no |
-| `lucida retry` | `./failed.txt` | yes |
+| `lucida retry` | failed list | yes |
+| `lucida config` | show/set the music folder | — |
 | `lucida setup` | — | — |
 | `lucida doctor` | environment check | — |
 
@@ -104,10 +118,13 @@ live/… unless you ask for them). A playlist/album URL downloads all its tracks
   `mp3` · `aac`/`m4a` · `opus` · `ogg` · `flac` · `wav`. Downloads FLAC then converts.
 - `--bitrate` — e.g. `320k`, `256k`, `192k` (for `--to`).
 - `--keep-original` — keep the source FLAC next to the transcoded file.
+- `--force` — ignore the dedup memory and re-download even items already recorded as
+  done (handy if `state.json` drifted out of sync).
 - `--organize / --flat` — tag-based `Artist/Album/` (default) vs everything in
   `downloads/Music/`.
 - `--country` — country code (default `US` for Qobuz; Amazon needs none).
-- `-o, --out` — output directory (default `./downloads`).
+- `-o, --out` — output directory for this run (default: the configured music folder,
+  `~/Downloads/music`).
 - `--hidden / --visible` — if a Cloudflare refresh is needed, open the window
   off-screen (`--hidden`) instead of visible.
 
@@ -135,9 +152,11 @@ lucida playlist "https://music.apple.com/.../pl.xxxxxxxx" [--dry-run] [-j N]
 ```
 
 Apple Music is not a lucida source: lucidadl reads the playlist's tracklist (title +
-artist) from the public page, then downloads each via Qobuz. `--dry-run` only lists
-(and writes `./inputs/playlist.txt`). *(Spotify/Deezer/Tidal are coded but disabled —
-flip `_PLAYLIST_OTHERS_ENABLED` in `lucidadl/api.py`.)*
+artist) from the public page **headless** (no visible window — Apple Music isn't behind
+Cloudflare; it retries with a visible window only if headless extracts nothing), then
+downloads each via Qobuz into `Playlists/<playlist name>/`. `--dry-run` only lists (and
+writes `./inputs/playlist.txt`). *(Spotify/Deezer/Tidal are coded but disabled — flip
+`_PLAYLIST_OTHERS_ENABLED` in `lucidadl/api.py`.)*
 
 ## Scheduling / "in the background"
 
@@ -146,14 +165,22 @@ watchlist with your OS scheduler. A Windows example is provided in `schedule.ps1
 
 ## Where files live
 
-- **Downloads / inputs / logs**: the current directory (`./downloads`, `./inputs`,
-  `./run.log`, `./failed.txt`).
-- **App data** (browser profile, `clearance.json`, dedup `state.json`): the OS user
-  data dir (`%LOCALAPPDATA%\lucidadl` on Windows, `~/.local/share/lucidadl` on Linux,
-  `~/Library/Application Support/lucidadl` on macOS). Override with `LUCIDADL_HOME`.
+- **Music**: one fixed folder, `~/Downloads/music` by default. Set it with
+  `lucida config --music "<path>"` or the `LUCIDADL_MUSIC` env var; `lucida config`
+  (no args) prints every path. Everything is saved here and deduped against here only.
+- **App data** (browser profile, `clearance.json`, dedup `state.json`, `config.json`,
+  `run.log`, `failed.txt`): the OS user data dir (`%LOCALAPPDATA%\lucidadl` on Windows,
+  `~/.local/share/lucidadl` on Linux, `~/Library/Application Support/lucidadl` on
+  macOS). Override with `LUCIDADL_HOME`.
+- **Watchlist inputs** (`tracks.txt`, `albums.txt`): `./inputs/` next to where you run
+  the command, so you can keep them in your project. Override per command with `-f`.
 
 ## Troubleshooting
 
+- **Everything lands in `Unknown Artist/Unknown Album`** → `mutagen` is missing in the
+  Python that runs `lucida` (tags can't be read). `pip install mutagen` into that
+  interpreter (it's a declared dependency, so a normal `pip install .`/`pipx` install
+  pulls it). lucidadl now prints a warning when it's absent.
 - **"Cloudflare non franchi"** → run `lucida setup` again (the cached cookie expired).
 - **"Executable doesn't exist"** → run `playwright install chromium`.
 - **Search finds nothing** → try a direct URL, or `-s amazon`.

@@ -11,7 +11,7 @@ import asyncio
 import os
 from typing import Dict, List, Optional, Tuple
 
-from . import matching, organize, transcode, utils
+from . import matching, organize, progress, transcode, utils
 from .api import LucidaClient, LucidaError, FALLBACK_SERVICES, normalize_service, _long
 
 
@@ -45,6 +45,30 @@ def _dest_dir(out: str, organize_on: bool) -> str:
     return os.path.join(out, ".incoming") if organize_on else os.path.join(out, "Music")
 
 
+def _join_artists(artists) -> str:
+    """Join a lucida `artists` list of {name} dicts. Returns '' (NOT 'Unknown Artist')
+    when empty, so it never masks a usable embedded tag in organize.album_dir."""
+    if isinstance(artists, str):
+        return artists
+    return ", ".join(a.get("name", "") for a in (artists or [])
+                     if isinstance(a, dict) and a.get("name"))
+
+
+def _track_meta(info: Dict, t: Dict, is_album: bool) -> Dict[str, str]:
+    """API-derived artist/album fallback for organization when a file has no embedded
+    tags. For an ALBUM, every track uses the album-level artist + album title so the
+    whole album groups into ONE folder (never per-track artist → no compilation scatter).
+    For a single track, uses the track's own artist + its album."""
+    if is_album:
+        who = _join_artists(info.get("artists"))
+        album = info.get("title") or ""
+    else:
+        who = _join_artists(t.get("artists")) or _join_artists(info.get("artists"))
+        alb = t.get("album") if isinstance(t.get("album"), dict) else None
+        album = (alb.get("title") if alb else t.get("album")) or ""
+    return {"albumartist": who, "artist": who, "album": album, "title": t.get("title") or ""}
+
+
 def _filesize_mb(path: Optional[str]) -> float:
     try:
         return os.path.getsize(_long(path)) / 1_048_576 if path else 0.0
@@ -67,7 +91,7 @@ async def _resolve_targets(client, line, kind, service, country, strict, log
             continue
         targets.append({"url": t["url"], "label": t.get("title") or line,
                         "csrf": t.get("csrf"), "csrfFallback": t.get("csrfFallback"),
-                        "expiry": expiry})
+                        "expiry": expiry, "meta": _track_meta(info, t, is_album)})
     if not targets:
         return None
     if is_album:
@@ -76,8 +100,9 @@ async def _resolve_targets(client, line, kind, service, country, strict, log
 
 
 async def _download_target(client, state, target, country, out, dedup, organize_on,
-                           tx, log, totals, failed, lock) -> None:
+                           tx, reporter, totals, failed, lock, collection=None) -> None:
     url, label = target["url"], target["label"]
+    log = reporter.log
     reserved = False
     if dedup and not state.reserve(url):
         log(f"  ⏭ déjà téléchargé / en cours, ignoré: {label}")
@@ -85,24 +110,27 @@ async def _download_target(client, state, target, country, out, dedup, organize_
             totals["skip"] += 1
         return
     reserved = dedup
-    log(f"  ▶ {label}")
+    reporter.start(url, label)
     track = {"url": url, "csrf": target["csrf"], "csrfFallback": target.get("csrfFallback")}
     path, last_err = None, None
     for attempt in range(2):
         try:
             handoff, server = await client.start_download(track, target["expiry"], country)
-            path = await client.run_job(handoff, server, _dest_dir(out, organize_on),
-                                        utils.sanitize(label), title=label)
+            path = await client.run_job(
+                handoff, server, _dest_dir(out, organize_on), utils.sanitize(label),
+                title=label,
+                on_status=lambda m, k=url: reporter.status(k, m),
+                on_bytes=lambda d, t, k=url: reporter.progress(k, d, t))
             break
         except Exception as e:
             last_err = e
             if attempt == 0:
-                log(f"  … {label}: {e} — nouvelle tentative")
+                reporter.status(url, f"{e} — nouvelle tentative")
                 await asyncio.sleep(3)
     if path is None:
         if reserved:
             state.release(url)
-        log(f"  ✗ {label}: {last_err}")
+        reporter.finish(url, False, f"  ✗ {label}: {last_err}")
         async with lock:
             totals["fail"] += 1
             failed.append(url)  # a track URL: `retry` can re-download it directly
@@ -110,17 +138,33 @@ async def _download_target(client, state, target, country, out, dedup, organize_
 
     finals = [path]
     if organize_on:
+        placed = None
         try:
-            finals = await asyncio.to_thread(organize.process_download, path, out) or [path]
+            placed = await asyncio.to_thread(
+                organize.process_download, path, out, collection, target.get("meta"))
         except Exception as e:
             log(f"  ⚠ rangement échoué ({os.path.basename(path)}): {e}")
+        if placed:
+            finals = placed
+        else:
+            # process_download consumed the source (moved the file / deleted the zip) but
+            # produced nothing usable (empty or audio-less archive, or it raised). Do NOT
+            # report a bogus success or record a non-existent path in the dedup state
+            # (that would loop forever): fail it so `retry` re-attempts.
+            if reserved:
+                state.release(url)
+            reporter.finish(url, False, f"  ✗ {label}: rangement sans fichier (archive vide ?)")
+            async with lock:
+                totals["fail"] += 1
+                failed.append(url)
+            return
     if tx and tx.get("fmt"):
         converted = []
         for fp in finals:
             try:
                 converted.append(await asyncio.to_thread(
                     transcode.transcode, fp, tx["fmt"], tx.get("bitrate"),
-                    tx.get("keep", False), log))
+                    tx.get("keep", False), lambda *_: None))
             except Exception as e:
                 log(f"  ⚠ transcode échoué ({os.path.basename(fp)}): {e}")
                 converted.append(fp)
@@ -130,9 +174,9 @@ async def _download_target(client, state, target, country, out, dedup, organize_
         totals["ok"] += 1
     shown = os.path.relpath(finals[0], out) if finals else os.path.basename(path)
     extra = f" (+{len(finals) - 1})" if len(finals) > 1 else ""
-    log(f"  ✓ {shown}{extra}  ({_filesize_mb(finals[0]):.1f} Mo)")
+    reporter.finish(url, True, f"  ✓ {shown}{extra}  ({_filesize_mb(finals[0]):.1f} Mo)")
     try:
-        state.add(url)
+        state.add(url, finals[0] if finals else path)
     except Exception as e:
         log(f"  ⚠ état non sauvegardé ({url}): {e}")
 
@@ -140,8 +184,12 @@ async def _download_target(client, state, target, country, out, dedup, organize_
 async def run_batch(client: LucidaClient, state: utils.State, items: List[str],
                     kind: str, service: str, country: Optional[str], out: str,
                     jobs: int, dedup: bool, organize_on: bool = True,
-                    tx: Optional[Dict] = None, strict: bool = False, log=print
+                    tx: Optional[Dict] = None, strict: bool = False,
+                    collection: Optional[str] = None, reporter=None
                     ) -> Tuple[Dict[str, int], List[str]]:
+    if reporter is None:
+        reporter = progress.TextReporter(print)
+    log = reporter.log
     totals = {"ok": 0, "skip": 0, "fail": 0}
     failed: List[str] = []
     sem = asyncio.Semaphore(max(1, jobs))
@@ -179,7 +227,8 @@ async def run_batch(client: LucidaClient, state: utils.State, items: List[str],
         async with sem:
             try:
                 await _download_target(client, state, target, country, out, dedup,
-                                       organize_on, tx, log, totals, failed, lock)
+                                       organize_on, tx, reporter, totals, failed, lock,
+                                       collection)
             except Exception as e:
                 log(f"  ✗ {target.get('label')}: {e}")
                 async with lock:

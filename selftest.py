@@ -89,6 +89,89 @@ check("source zip removed", not _os.path.exists(_zp))
 check("cover placed next to track", _os.path.exists(_os.path.join(_os.path.dirname(_finals[0]), "cover.jpg")))
 _sh.rmtree(_d, ignore_errors=True)
 
+# organize: API-metadata fallback (used only when embedded tags are missing)
+check("mutagen_available is bool", isinstance(_org.mutagen_available(), bool))
+# embedded tags WIN over meta
+_ad = _org.album_dir("/m", {"albumartist": "RHCP", "album": "Cal"},
+                     {"albumartist": "MetaAA", "album": "MetaAlb"})
+check("album_dir: embedded tags win over meta", _ad.replace("\\", "/").endswith("/m/RHCP/Cal"))
+# meta FILLS BLANKS when tags absent
+_ad = _org.album_dir("/m", {}, {"albumartist": "Daft Punk", "album": "Discovery"})
+check("album_dir: meta fills blank tags", _ad.replace("\\", "/").endswith("/m/Daft Punk/Discovery"))
+# CRITICAL regression: embedded `artist` (blank albumartist) must NOT be relocated by meta albumartist
+_ad = _org.album_dir("/m", {"artist": "RealArtist"}, {"albumartist": "MetaAA", "album": "X"})
+check("album_dir: embedded artist not overridden by meta albumartist",
+      _ad.replace("\\", "/").endswith("/m/RealArtist/X"))
+# meta=None unchanged (backward compat)
+check("album_dir: meta=None unchanged",
+      _org.album_dir("/m", {"album": "Y"}).replace("\\", "/").endswith("/m/Unknown Artist/Y"))
+
+# place_file / process_download thread meta; collection still wins
+_d2 = tempfile.mkdtemp(prefix="lucidadl_meta_")
+def _junk(name):
+    p = _os.path.join(_d2, name)
+    with open(p, "wb") as fh:
+        fh.write(b"not a real flac")
+    return p
+_pf = _org.place_file(_junk("a.flac"), _d2, meta={"albumartist": "Daft Punk", "album": "Discovery"})
+check("place_file: album under Artistes/<Artist>/<Album> via meta",
+      _os.path.dirname(_pf).replace("\\", "/").endswith("/Artistes/Daft Punk/Discovery"))
+_pf = _org.place_file(_junk("b.flac"), _d2, collection="MyMix",
+                      meta={"albumartist": "Daft Punk", "album": "Discovery"})
+check("place_file: playlist under Playlists/<name> (collection beats meta)",
+      _os.path.dirname(_pf).replace("\\", "/").endswith("/Playlists/MyMix"))
+_pf = _org.process_download(_junk("c.flac"), _d2, None, {"albumartist": "AA", "album": "BB"})[0]
+check("process_download threads meta", _os.path.dirname(_pf).replace("\\", "/").endswith("/AA/BB"))
+# zip + meta
+_zp2 = _os.path.join(_d2, "alb.zip")
+with _zip.ZipFile(_zp2, "w") as z:
+    z.writestr("01 - Song.flac", b"x")
+_zf = _org.process_download(_zp2, _d2, None, {"albumartist": "CompAA", "album": "Cal"})
+check("zip + meta -> album folder", _os.path.dirname(_zf[0]).replace("\\", "/").endswith("/CompAA/Cal"))
+# audio-less zip: process_download returns [] (downloader treats [] as a failure, not
+# a bogus success on the deleted zip path) and the source zip is still removed
+_zp3 = _os.path.join(_d2, "noaudio.zip")
+with _zip.ZipFile(_zp3, "w") as z:
+    z.writestr("cover.jpg", b"img")
+    z.writestr("notes.txt", b"hello")
+_zf3 = _org.process_download(_zp3, _d2)
+check("audio-less zip -> [] (no false success)", _zf3 == [])
+check("audio-less zip still removed", not _os.path.exists(_zp3))
+_sh.rmtree(_d2, ignore_errors=True)
+
+# downloader meta builders
+from lucidadl.downloader import _track_meta as _tm, _join_artists as _ja
+check("_join_artists None -> ''", _ja(None) == "")
+check("_join_artists skips nameless", _ja([{"name": "X"}, {"foo": 1}]) == "X")
+_m_alb = _tm({"title": "Californication", "artists": [{"name": "RHCP"}]},
+             {"title": "Around the World", "artists": [{"name": "RHCP"}]}, True)
+check("_track_meta album: album-level artist + album title",
+      _m_alb == {"albumartist": "RHCP", "album": "Californication", "artist": "RHCP",
+                 "title": "Around the World"})
+# compilation: album-level artist used for ALL tracks (no per-track scatter)
+_m_va = _tm({"title": "VA Comp", "artists": [{"name": "Various Artists"}]},
+            {"title": "Song", "artists": [{"name": "Some Performer"}]}, True)
+check("_track_meta album: uses album artist, not per-track (no scatter)",
+      _m_va["albumartist"] == "Various Artists")
+_m_sgl = _tm({}, {"title": "One More Time", "artists": [{"name": "Daft Punk"}],
+                  "album": {"title": "Discovery"}}, False)
+check("_track_meta single: track artist + nested album.title",
+      _m_sgl["albumartist"] == "Daft Punk" and _m_sgl["album"] == "Discovery")
+
+# TUI watchlist delete must preserve comments / blank lines (data-loss fix)
+from lucidadl import tui as _tui
+_wd = tempfile.mkdtemp(prefix="lucidadl_wl_")
+_wf = _os.path.join(_wd, "tracks.txt")
+with open(_wf, "w", encoding="utf-8") as fh:
+    fh.write("# header comment\n\nArtist - Keep\nArtist - Drop\n")
+_tui._remove_entries(_wf, ["Artist - Drop"])
+with open(_wf, encoding="utf-8") as fh:
+    _wc = fh.read()
+check("watchlist delete preserves comment+blank+other, drops selected",
+      "# header comment" in _wc and "\n\n" in _wc and "Artist - Keep" in _wc
+      and "Artist - Drop" not in _wc)
+_sh.rmtree(_wd, ignore_errors=True)
+
 # matching: pick the real track over remixes / the real album over tributes
 from lucidadl import matching as _m
 _tracks = [
