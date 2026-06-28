@@ -220,6 +220,31 @@ check("matching: wrong artist loses",
                          [{"url": "w", "title": "Otherside", "artist": "Macklemore"},
                           {"url": "r", "title": "Otherside", "artist": "Red Hot Chili Peppers"}]) == "r")
 
+# resolver query variants (specific -> loose) + artist-gated broadening
+from lucidadl.downloader import _query_variants as _qv
+_v = _qv("Sinyo' - Enfant Perdu")
+check("variants: full query first", _v[0] == "Sinyo' - Enfant Perdu")
+check("variants: title-only included", "Enfant Perdu" in _v)
+_v2 = _qv("Ptite Soeur, FEMTOGO - PUKE SOMETHING")
+check("variants: title-only + primary-artist forms",
+      "PUKE SOMETHING" in _v2 and "Ptite Soeur PUKE SOMETHING" in _v2)
+check("variants: no separator -> just the line", _qv("Madonna") == ["Madonna"])
+
+_title_hits = [
+    {"url": "wrong", "title": "Enfant Perdu", "artist": "Some Other Artist", "context": "Enfant Perdu Some Other Artist"},
+    {"url": "right", "title": "Enfant Perdu", "artist": "Sinyo", "context": "Enfant Perdu Sinyo"},
+]
+check("require_artist picks the matching artist from a title-only search",
+      matching.pick_best("Sinyo' - Enfant Perdu", _title_hits, require_artist=True) == "right")
+_only_wrong = [{"url": "w", "title": "Enfant Perdu", "artist": "Nope", "context": "Enfant Perdu Nope"}]
+check("require_artist returns None when no artist matches (no wrong download)",
+      matching.pick_best("Sinyo' - Enfant Perdu", _only_wrong, require_artist=True) is None)
+check("require_artist off -> legacy best-anyway behavior",
+      matching.pick_best("Sinyo' - Enfant Perdu", _only_wrong) == "w")
+check("artist_matches token overlap",
+      matching.artist_matches("Sinyo' - Enfant Perdu", {"artist": "Sinyo"}) is True
+      and matching.artist_matches("Sinyo' - Enfant Perdu", {"artist": "Other"}) is False)
+
 # transcode bitrate normalization (bare number = kbps)
 from lucidadl import transcode as _T
 check("bitrate 192 -> 192k", _T.norm_bitrate("192") == "192k")

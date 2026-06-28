@@ -9,10 +9,36 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import Dict, List, Optional, Tuple
 
 from . import matching, organize, progress, transcode, utils
 from .api import LucidaClient, LucidaError, FALLBACK_SERVICES, normalize_service, _long
+
+
+def _query_variants(line: str) -> List[str]:
+    """Search queries to try, specific → loose. lucida/Qobuz often returns nothing for a
+    literal "Artist - Title" (niche or multi-artist tracks), but matches the title alone,
+    so we fall back to the title and to a primary-artist + title form. Broadened variants
+    are artist-gated by the caller so they can't pick a wrong-artist track."""
+    if " - " in line:
+        artist, title = (p.strip() for p in line.split(" - ", 1))
+    else:
+        artist, title = "", line.strip()
+    out = [line]
+    if artist and title:
+        primary = re.split(r"\s*(?:,|&|/| feat\.?| ft\.?| x | vs\.?| with )\s*",
+                           artist, maxsplit=1, flags=re.I)[0].strip()
+        for cand in (title, f"{primary} {title}" if primary else "",
+                     f"{title} {primary}" if primary else ""):
+            if cand:
+                out.append(cand)
+    seen, uniq = set(), []
+    for v in out:
+        if v and v.lower() not in seen:
+            seen.add(v.lower())
+            uniq.append(v)
+    return uniq
 
 
 async def _resolve_url(client: LucidaClient, line: str, service: str, kind: str,
@@ -26,18 +52,26 @@ async def _resolve_url(client: LucidaClient, line: str, service: str, kind: str,
             if normalize_service(s) != normalize_service(service):
                 services.append(s)
     bucket = "albums" if kind == "album" else "tracks"
+    variants = _query_variants(line)
     for i, svc in enumerate(services):
-        res = await client.search(line, svc)
-        items = res.get(bucket) or []
-        if not items and kind == "album":
-            items = res.get("tracks") or []
-        if items:
-            url = matching.pick_best(line, items)
-            chosen = next((it for it in items if it.get("url") == url), {})
+        for v_idx, q in enumerate(variants):
+            res = await client.search(q, svc)
+            items = res.get(bucket) or []
+            if not items and kind == "album":
+                items = res.get("tracks") or []
+            if not items:
+                continue
+            # The full query keeps its lenient match; broadened variants must match the
+            # artist, so a title-only search can't silently grab the wrong artist.
+            url = matching.pick_best(line, items, require_artist=(v_idx > 0))
+            if not url:
+                continue
             if not quiet:  # playlists (many items) suppress this per-track confirmation
+                chosen = next((it for it in items if it.get("url") == url), {})
                 tag = f" [fallback {svc}]" if i else ""
-                log(f"  ↳ chosen: \"{chosen.get('title', '?')}\" — {chosen.get('artist', '?')}{tag} "
-                    f"(among {len(items)} results)")
+                via = "" if v_idx == 0 else f' [via "{q}"]'
+                log(f"  ↳ chosen: \"{chosen.get('title', '?')}\" — "
+                    f"{chosen.get('artist', '?')}{tag}{via} (among {len(items)} results)")
             return url
     return None
 

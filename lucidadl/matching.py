@@ -77,13 +77,34 @@ def score(query: str, item: Dict[str, str]) -> float:
     return s
 
 
-def pick_best(query: str, items: List[Dict[str, str]]) -> Optional[str]:
-    """Return the URL of the best-scoring candidate (ties → earliest result)."""
+def artist_matches(query: str, item: Dict[str, str]) -> bool:
+    """True if the item's artist (or row context) overlaps the query's artist tokens.
+    Used to reject wrong-artist hits when a search was broadened to the title alone."""
+    artist_q, _ = _split_query(query)
+    aq = _tokens(artist_q)
+    if not aq:
+        return True  # no artist asked for → nothing to reject
+    pool = _tokens(item.get("artist", "")) | _tokens(item.get("context") or "")
+    return bool(aq & pool)
+
+
+def pick_best(query: str, items: List[Dict[str, str]],
+              require_artist: bool = False) -> Optional[str]:
+    """Return the URL of the best-scoring candidate (ties → earliest result). When
+    `require_artist` is set and the query names an artist, only candidates whose artist
+    matches are considered, and None is returned if none do (so a broadened title-only
+    search can't silently pick a track by the wrong artist)."""
     if not items:
         return None
+    pool = items
+    if require_artist:
+        matched = [it for it in items if artist_matches(query, it)]
+        if not matched:
+            return None
+        pool = matched
     best_i, best_s = 0, None
-    for i, it in enumerate(items):
+    for i, it in enumerate(pool):
         sc = score(query, it)
         if best_s is None or sc > best_s:
             best_s, best_i = sc, i
-    return items[best_i].get("url")
+    return pool[best_i].get("url")

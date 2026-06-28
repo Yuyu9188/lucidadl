@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- Cleaner playlist output: a table for `--dry-run` and a single header line + progress
+  bars for a download, instead of dumping the whole tracklist and a per-track log line.
+
+### Fixed
+- Playlist/search resolution now finds niche and multi-artist tracks. When the literal
+  `"Artist - Title"` query returns nothing, it retries with the title alone (and a
+  primary-artist + title form), verifying the artist before accepting — so a broadened
+  search can't silently grab the wrong song.
+
 ## [0.1.0] - 2026-06-27
 
 First public release.
