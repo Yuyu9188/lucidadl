@@ -9,6 +9,12 @@ Fast, parallel command-line music downloader built on top of
 parallel over plain HTTP, organize them by tags, transcode to the format/bitrate you
 want, and import playlists.
 
+**A vibe-coded project.** lucidadl was built quickly and AI-assisted ("vibe coding"). It
+wraps and automates downloading from [lucida.to](https://lucida.to) — inspired by two
+existing open-source lucida downloaders we looked at (see [Credits](#credits)) and adding
+the features I wanted on top: parallel downloads, local transcoding, tag-based
+organization, playlist import, existence-aware dedup, and an interactive menu.
+
 > **Disclaimer.** This is a personal-use tool, similar in spirit to `yt-dlp`. You are
 > responsible for complying with the terms of service of lucida.to and of the source
 > services, and with the copyright law of your jurisdiction. The authors are not
@@ -29,7 +35,8 @@ want, and import playlists.
   "Unknown"); playlists go under `Playlists/<name>/`, kept separate from artists.
 - **Watchlists** with dedup (`tracks` / `albums` read a file, skip what's done — but a
   file you deleted is re-downloaded; `--force` ignores the memory entirely).
-- **Apple Music playlist import** (public link → tracklist → download via Qobuz).
+- **Playlist import** — paste a playlist link and get every track via lucida. Apple
+  Music is wired up today; adding more sources is easy (PRs welcome).
 - **Interactive search**, **service fallback** (Qobuz → Amazon), **retry** of failures.
 - **Interactive menu** (`lucida ui`, or just `lucida`) and **live progress bars** — one
   bar per parallel download, in any real terminal.
@@ -50,6 +57,11 @@ desktop session (it can't run on a locked/headless server).
 ## Install
 
 `pip install` adds a global **`lucida`** command (alias: `lucidadl`).
+
+> **Already using [lucida-downloader](https://github.com/jelni/lucida-downloader)?** Its
+> binary is also called `lucida`, so the two clash on your `PATH`. Just use the
+> **`lucidadl`** alias for this tool (e.g. `lucidadl track "…"`, `lucidadl ui`) — every
+> command below works the same with `lucidadl` in place of `lucida`.
 
 **Recommended — isolated, on PATH ([pipx](https://pipx.pypa.io)):**
 
@@ -149,18 +161,28 @@ lucida tracks      # downloads everything new, skips what's already done
 lucida albums
 ```
 
-## Apple Music playlist
+## Playlists
 
 ```bash
 lucida playlist "https://music.apple.com/.../pl.xxxxxxxx" [--dry-run] [-j N]
 ```
 
-Apple Music is not a lucida source: lucidadl reads the playlist's tracklist (title +
-artist) from the public page **headless** (no visible window — Apple Music isn't behind
-Cloudflare; it retries with a visible window only if headless extracts nothing), then
-downloads each via Qobuz into `Playlists/<playlist name>/`. `--dry-run` only lists (and
-writes `./inputs/playlist.txt`). *(Spotify/Deezer/Tidal are coded but disabled — flip
-`_PLAYLIST_OTHERS_ENABLED` in `lucidadl/api.py`.)*
+Give it a playlist link: lucidadl reads the track list (title + artist) straight from the
+page, then downloads each track through lucida (Qobuz) into `Playlists/<playlist name>/`.
+`--dry-run` just lists them (and writes `./inputs/playlist.txt`) without downloading.
+
+**Only Apple Music is implemented today — that's what I use.** Adding other sources
+(Spotify, Deezer, Tidal…) is straightforward, and contributions are welcome. The playlist
+scraping all lives in [`lucidadl/api.py`](lucidadl/api.py):
+
+- `playlist_tracklist()` — picks a scraper based on the link's host.
+- `applemusic_tracklist()` — the working Apple Music scraper (your reference example).
+- `_scrape_playlist()` + `_PLAYLIST_SOURCES` — a generic scraper with per-site CSS
+  selectors (best-guess starting points for Spotify/Deezer/Tidal), gated behind the
+  `_PLAYLIST_OTHERS_ENABLED` flag.
+
+To add a source: flip `_PLAYLIST_OTHERS_ENABLED = True`, fix the selectors for your
+service in `_PLAYLIST_SOURCES`, test, and open a PR.
 
 ## Scheduling / "in the background"
 
@@ -189,6 +211,19 @@ watchlist with your OS scheduler. A Windows example is provided in `schedule.ps1
 - **"Executable doesn't exist"** → run `playwright install chromium`.
 - **Search finds nothing** → try a direct URL, or `-s amazon`.
 - **`lucida doctor`** → checks Python, Playwright, and reachability.
+
+## Credits
+
+lucidadl takes inspiration from two existing open-source lucida.to downloaders we looked
+at while building it:
+
+- **[lucida-flow](https://github.com/ryanlong1004/lucida-flow)** — a Python CLI/API that
+  drives lucida.to through browser automation; the starting point for the browser side.
+- **[lucida-downloader](https://github.com/jelni/lucida-downloader)** — a fast,
+  multithreaded Rust client; the inspiration for downloading many tracks concurrently.
+
+It's a "vibe-coded" project (built quickly, AI-assisted), so expect rough edges — issues
+and PRs that sharpen or extend it are very welcome.
 
 ## Contributing
 
