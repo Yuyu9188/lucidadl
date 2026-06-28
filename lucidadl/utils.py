@@ -58,24 +58,42 @@ def _path_exists(path: str) -> bool:
         return False
 
 
+def _as_paths(v) -> List[str]:
+    if isinstance(v, list):
+        return [str(x) for x in v if x]
+    return [str(v)] if v else []
+
+
+def _is_under(path: str, directory: str) -> bool:
+    """True if `path` lives inside `directory` (case-insensitive on Windows)."""
+    try:
+        p = os.path.normcase(os.path.abspath(path))
+        d = os.path.normcase(os.path.abspath(directory))
+        return p == d or p.startswith(d + os.sep)
+    except Exception:
+        return False
+
+
 class State:
-    """Remembers which track URLs were already downloaded, *and where the file landed*,
-    so a re-run skips an item only while its file still exists on disk. Delete the file
-    → it is re-downloaded. Legacy state (no recorded path) is treated as 'done'."""
+    """Remembers which track URLs were downloaded, AND where each copy landed, so a
+    re-run skips an item only while a copy still exists on disk (delete it → re-download).
+    A track may be recorded in several places (e.g. an album folder AND a playlist folder):
+    `under` scopes the check to one destination, so a track present elsewhere is still
+    fetched into a playlist folder that is missing it."""
 
     def __init__(self, path: str):
         self.path = path
         self._lock = threading.Lock()
-        self.done: Dict[str, str] = {}   # url -> final file path ("" = unknown/legacy)
+        self.done: Dict[str, List[str]] = {}   # url -> list of final file paths
         self._inflight = set()
         if os.path.exists(path):
             try:
                 with open(path, encoding="utf-8") as f:
                     raw = json.load(f).get("done", [])
-                if isinstance(raw, dict):
-                    self.done = {str(k): str(v or "") for k, v in raw.items()}
-                else:  # legacy: a plain list of URLs, no paths
-                    self.done = {str(k): "" for k in raw}
+                if isinstance(raw, dict):                 # {url: path} or {url: [paths]}
+                    self.done = {str(k): _as_paths(v) for k, v in raw.items()}
+                else:                                     # oldest: a plain list of URLs
+                    self.done = {str(k): [] for k in raw}
             except Exception as e:
                 # The file EXISTS but is unreadable: don't silently drop the whole dedup
                 # history (the next add() would overwrite it). Back it up and warn.
@@ -89,18 +107,25 @@ class State:
                     f"⚠ dedup state unreadable ({path}: {e}) — backed up to {bak} then "
                     f"reset; duplicates are possible this run.\n")
 
-    def has(self, key: str) -> bool:
-        """True if this URL counts as already-downloaded. A recorded path that no
-        longer exists on disk does NOT count (the user deleted it → re-download)."""
+    def has(self, key: str, under: Optional[str] = None) -> bool:
+        """True if this URL counts as already-downloaded. A recorded path that no longer
+        exists does NOT count (deleted → re-download). When `under` is given, only a copy
+        inside that directory counts."""
         if key not in self.done:
             return False
-        p = self.done[key]
-        return _path_exists(p) if p else True
+        paths = [p for p in self.done[key] if p]
+        if not paths:
+            # legacy entry, no recorded path: can't verify location. Done only for an
+            # unscoped check; for a specific destination, re-download to be safe.
+            return under is None
+        if under is not None:
+            return any(_path_exists(p) and _is_under(p, under) for p in paths)
+        return any(_path_exists(p) for p in paths)
 
-    def reserve(self, key: str) -> bool:
+    def reserve(self, key: str, under: Optional[str] = None) -> bool:
         """Atomically claim a key (asyncio single-thread: no await inside).
         Returns False if already downloaded (and present) or currently in flight."""
-        if key in self._inflight or self.has(key):
+        if key in self._inflight or self.has(key, under):
             return False
         self._inflight.add(key)
         return True
@@ -110,7 +135,9 @@ class State:
 
     def add(self, key: str, path: str = "") -> None:
         with self._lock:
-            self.done[key] = path or self.done.get(key) or ""
+            paths = self.done.setdefault(key, [])
+            if path and path not in paths:
+                paths.append(path)
             self._inflight.discard(key)
             tmp = self.path + f".{os.getpid()}.tmp"
             with open(tmp, "w", encoding="utf-8") as f:

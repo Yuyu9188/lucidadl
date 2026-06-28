@@ -68,6 +68,33 @@ check("reserve blocked after done", st.reserve("u1") is False)
 check("reserve other ok + release", st.reserve("u2") and (st.release("u2") or st.reserve("u2")))
 _os.remove(p)
 
+# dedup scoped to a destination folder (playlist) + multi-path per URL
+import shutil as _sh0
+_d3 = tempfile.mkdtemp(prefix="lucidadl_state2_")
+_sp = _os.path.join(_d3, "state.json")
+_artists = _os.path.join(_d3, "Artists", "Sinyo", "Enfant Perdu")
+_pls = _os.path.join(_d3, "Playlists", "saddd")
+_os.makedirs(_artists); _os.makedirs(_pls)
+_af = _os.path.join(_artists, "Enfant Perdu.flac"); open(_af, "w").write("x")
+s3 = utils.State(_sp)
+s3.add("urlE", _af)                                  # downloaded standalone into Artists/
+check("scoped: present anywhere counts unscoped", s3.has("urlE"))
+check("scoped: NOT done for a playlist folder it's missing from",
+      not s3.has("urlE", under=_pls))
+check("scoped: reserve succeeds to fetch it into the playlist",
+      s3.reserve("urlE", under=_pls))
+s3.release("urlE")
+_pf = _os.path.join(_pls, "Enfant Perdu.flac"); open(_pf, "w").write("y")
+s3.add("urlE", _pf)                                  # now also in the playlist folder
+check("scoped: done once present in the playlist folder", s3.has("urlE", under=_pls))
+check("multi-path persisted", sorted(utils.State(_sp).done["urlE"]) == sorted([_af, _pf]))
+s3.done["urlLegacy"] = []                            # legacy entry, no recorded path
+check("legacy unscoped = done", s3.has("urlLegacy"))
+check("legacy scoped = re-download", not s3.has("urlLegacy", under=_pls))
+_os.remove(_pf)
+check("deleted playlist copy -> not done for that playlist", not s3.has("urlE", under=_pls))
+_sh0.rmtree(_d3, ignore_errors=True)
+
 # organize: album_dir + zip extraction/placement (no real tags -> Unknown)
 from lucidadl import organize as _org
 ad = _org.album_dir("/music", {"albumartist": "RHCP", "album": "Cal"})

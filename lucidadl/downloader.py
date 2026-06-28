@@ -138,8 +138,12 @@ async def _download_target(client, state, target, country, out, dedup, organize_
                            tx, reporter, totals, failed, lock, collection=None) -> None:
     url, label = target["url"], target["label"]
     log = reporter.log
+    # For a playlist, dedup is scoped to the playlist folder: a track already in
+    # Artists/ (or another playlist) is still fetched into THIS playlist if it's missing.
+    under = (os.path.join(out, organize.PLAYLISTS_DIR, utils.sanitize(collection))
+             if collection else None)
     reserved = False
-    if dedup and not state.reserve(url):
+    if dedup and not state.reserve(url, under):
         log(f"  ⏭ already downloaded / in progress, skipped: {label}")
         async with lock:
             totals["skip"] += 1
