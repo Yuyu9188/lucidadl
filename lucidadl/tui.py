@@ -372,8 +372,8 @@ def _settings_menu(s, console, questionary) -> None:
 
 def _edit_setting(key, s, console, questionary) -> None:
     if key == "jobs":
-        v = questionary.text("Parallel downloads (1–20):", default=str(s["jobs"]),
-                             validate=lambda x: x.isdigit() and 1 <= int(x) <= 20).ask()
+        v = questionary.text("Parallel downloads (1–100):", default=str(s["jobs"]),
+                             validate=lambda x: x.isdigit() and 1 <= int(x) <= 100).ask()
         if not v:
             return
         s["jobs"] = int(v)

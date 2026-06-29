@@ -165,7 +165,7 @@ live/… unless you ask for them). A playlist/album URL downloads all its tracks
 
 ## Options (download commands)
 
-- `-j, --jobs N` — parallel downloads, 1–20 (default 3).
+- `-j, --jobs N` — parallel downloads, 1–100 (default 3).
 - `-s, --service` — `qobuz` (default) or `amazon`. If the primary finds nothing, it
   falls back to the other automatically.
 - `-F, --format` — format requested from lucida (server-side, no bitrate control):

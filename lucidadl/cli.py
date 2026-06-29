@@ -68,8 +68,8 @@ def _service_opts(f):
     f = click.option("--organize/--flat", "organize_on", default=True,
                      help="Sort by tags into Artists/<Artist>/<Album>/ (default); "
                           "--flat = everything flat in <music folder>/Music/.")(f)
-    f = click.option("-j", "--jobs", default=3, type=click.IntRange(1, 20),
-                     help="Parallel downloads (1–20, def 3).")(f)
+    f = click.option("-j", "--jobs", default=3, type=click.IntRange(1, 100),
+                     help="Parallel downloads (1–100, def 3).")(f)
     f = click.option("--to", "to_fmt", default=None, type=click.Choice(transcode.CHOICES),
                      help="Local ffmpeg transcoding (recommended): download as FLAC then "
                           "convert to this format. Bitrate adjustable via --bitrate.")(f)
